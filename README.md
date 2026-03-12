@@ -1,93 +1,149 @@
-# Wow-Launcher
+# Old Man Warcraft Launcher
 
+`Old Man Warcraft Launcher` is a Windows Forms launcher for the `Old Man Warcraft` Wrath of the Lich King `3.3.5a` client.
 
+It targets `.NET Framework 4.7.2` and provides:
 
-## Getting started
+- client file update checks from the hardcoded manifest URL `https://updates.oldmanwarcraft.com/updates/manifest.xml`
+- launcher self-updates from the latest GitLab release
+- a built-in news panel powered by the manifest `breakingNewsUrl` feed
+- GitLab CI/CD automation for validation, tagging, release publishing, and launcher delivery
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Project Structure
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- `Wow-Launcher/` - Windows Forms application
+- `scripts/Build-Launcher.ps1` - local and CI build script
+- `scripts/New-GitLabTag.ps1` - automatic GitLab tag creation script
+- `scripts/Publish-GitLabRelease.ps1` - GitLab release publishing script
+- `scripts/Generate-Manifest.ps1` - client update manifest generator
+- `.gitlab-ci.yml` - GitLab CI/CD pipeline
+- `SERVER_SIDE_SETUP.md` - update hosting and deployment guide
 
-## Add your files
+## Runtime Update Architecture
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Client updates
 
+The launcher always checks the same hardcoded manifest URL:
+
+- `https://updates.oldmanwarcraft.com/updates/manifest.xml`
+
+The manifest controls:
+
+- the visible client build number
+- the list of files to download
+- SHA256 validation
+- file size validation
+- the launch target, usually `Wow.exe`
+- the `breakingNewsUrl` for launcher news
+
+### Launcher self-updates
+
+The launcher checks the latest GitLab release API for a release asset named:
+
+- `Wow-Launcher.exe`
+
+When the release tag version is newer than the running assembly version, the launcher downloads the updated executable, restarts, and replaces itself.
+
+## Prerequisites
+
+- Windows
+- Visual Studio or Build Tools with `MSBuild.exe`
+- `.NET Framework 4.7.2` targeting pack
+- a Windows GitLab runner tagged `windows` for CI/CD
+
+## Local Development
+
+### Build locally
+
+```powershell
+.\scripts\Build-Launcher.ps1
 ```
-cd existing_repo
-git remote add origin https://gitlab.thecorehosting.net/root/wow-launcher.git
-git branch -M main
-git push -uf origin main
+
+### Build a version-stamped release locally
+
+```powershell
+.\scripts\Build-Launcher.ps1 -ReleaseVersion v1.0.1
 ```
 
-## Integrate with your tools
+This temporarily stamps `AssemblyVersion`, `AssemblyFileVersion`, and `AssemblyInformationalVersion` during the build.
 
-* [Set up project integrations](https://gitlab.thecorehosting.net/root/wow-launcher/-/settings/integrations)
+## Manifest Generation
 
-## Collaborate with your team
+Generate `manifest.xml` from a prepared update folder:
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```powershell
+.\scripts\Generate-Manifest.ps1 `
+    -UpdateRoot "C:\build\wow-updates" `
+    -BaseUrl "https://updates.oldmanwarcraft.com/updates/" `
+    -Version "3.3.5a.001"
+```
 
-## Test and Deploy
+By default, the manifest generator also writes:
 
-Use the built-in continuous integration in GitLab.
+- `breakingNewsUrl` = `https://updates.oldmanwarcraft.com/updates/release-notes.json`
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## News Feed Format
 
-***
+The launcher expects `breakingNewsUrl` to point to a JSON feed containing `latest` and optional `history` entries.
 
-# Editing this README
+Typical feed URL:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+- `https://updates.oldmanwarcraft.com/updates/release-notes.json`
 
-## Suggestions for a good README
+See `SERVER_SIDE_SETUP.md` for a complete example.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## GitLab CI/CD
 
-## Name
-Choose a self-explaining name for your project.
+The project uses `.gitlab-ci.yml` with these stages:
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+1. `verify`
+2. `tag`
+3. `build`
+4. `release`
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+### Pipeline behavior
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- merge requests run the validation build
+- default-branch pushes run the validation build and then create the next launcher tag
+- tag pipelines build the launcher with the tag version and publish the GitLab release
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Automatic tagging
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Default-branch pushes create the next patch tag in this format:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+- `v1.0.1`
+- `v1.0.2`
+- `v1.0.3`
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+To skip automatic tag creation for a commit, include this in the commit message:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+- `[skip release]`
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Required GitLab variables
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Add this protected CI/CD variable in GitLab:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- `GITLAB_API_TOKEN` - token with API scope for tag creation and release publishing
 
-## License
-For open source projects, say how it is licensed.
+## Release Process
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Launcher release
+
+1. Push changes to the default branch.
+2. Let the `verify` job succeed.
+3. Let the `tag` job create the next `vX.Y.Z` tag.
+4. The tag pipeline builds `Wow-Launcher.exe`.
+5. The release job creates the GitLab release and attaches the launcher executable.
+6. The launcher will detect the newer release automatically.
+
+### Client patch release
+
+1. Prepare the files to distribute in an update folder.
+2. Run `scripts/Generate-Manifest.ps1`.
+3. Upload the files, `manifest.xml`, and `release-notes.json`.
+4. Test with an older client folder.
+5. Confirm the launcher news panel and patch download flow both work.
+
+## Additional Documentation
+
+- `SERVER_SIDE_SETUP.md` - hosting, manifest, release notes, caching, and update deployment details

@@ -1,51 +1,50 @@
-<<<<<<< HEAD
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/user/application_security/sast/#available-cicd-variables
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/
-# Dependency Scanning customization: https://docs.gitlab.com/user/application_security/dependency_scanning/#customizing-analyzer-behavior
-# Container Scanning customization: https://docs.gitlab.com/user/application_security/container_scanning/#customizing-analyzer-behavior
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ci/variables/#cicd-variable-precedence
 stages:
-- build
-- test
-- deploy
-- review
-- dast
-- staging
-- canary
-- production
-- incremental rollout 10%
-- incremental rollout 25%
-- incremental rollout 50%
-- incremental rollout 100%
-- performance
-- cleanup
-- secret-detection
-variables:
-  SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
-include:
-- template: Auto-DevOps.gitlab-ci.yml
-=======
-stages:
+  - verify
+  - tag
   - build
   - release
 
 workflow:
   rules:
-    - if: $CI_COMMIT_TAG
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - when: never
 
 default:
   tags:
     - windows
 
-build_launcher:
-  stage: build
+variables:
+  PROJECT_PATH: "Wow-Launcher\\Wow-Launcher.csproj"
+  BUILD_CONFIGURATION: "Release"
+  BUILD_OUTPUT_DIRECTORY: "artifacts"
+  RELEASE_OUTPUT_DIRECTORY: "release"
+
+verify_launcher:
+  stage: verify
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
   script:
-    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Launcher.ps1 -ProjectPath "Wow-Launcher\Wow-Launcher.csproj" -Configuration "Release" -OutputDirectory "artifacts"
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Launcher.ps1 -ProjectPath "$env:PROJECT_PATH" -Configuration "$env:BUILD_CONFIGURATION" -OutputDirectory "$env:BUILD_OUTPUT_DIRECTORY"
+
+create_release_tag:
+  stage: tag
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE !~ /(?i)\[skip release\]/'
+      when: on_success
+    - when: never
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\New-GitLabTag.ps1
+
+build_launcher_release:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build-Launcher.ps1 -ProjectPath "$env:PROJECT_PATH" -Configuration "$env:BUILD_CONFIGURATION" -OutputDirectory "$env:BUILD_OUTPUT_DIRECTORY" -ReleaseVersion "$env:CI_COMMIT_TAG"
   artifacts:
     paths:
       - artifacts/Wow-Launcher.exe
@@ -53,14 +52,15 @@ build_launcher:
 
 release_launcher:
   stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG'
   needs:
-    - job: build_launcher
+    - job: build_launcher_release
       artifacts: true
   script:
-    - powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path release | Out-Null; Copy-Item artifacts\Wow-Launcher.exe release\Wow-Launcher.exe -Force"
+    - powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path $env:RELEASE_OUTPUT_DIRECTORY | Out-Null; Copy-Item artifacts\Wow-Launcher.exe release\Wow-Launcher.exe -Force"
     - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Publish-GitLabRelease.ps1 -AssetPath "release\Wow-Launcher.exe" -AssetName "Wow-Launcher.exe"
   artifacts:
     paths:
       - release/Wow-Launcher.exe
     expire_in: never
->>>>>>> 08759a6 (Initial launcher with GitLab self-update support)

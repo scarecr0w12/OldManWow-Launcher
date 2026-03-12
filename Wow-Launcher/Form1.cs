@@ -554,14 +554,18 @@ namespace Wow_Launcher
 
         private static bool IsLauncherUpdateAvailable(string currentVersion, string remoteVersion)
         {
-            string normalizedCurrent = (currentVersion ?? string.Empty).Trim();
-            string normalizedRemote = (remoteVersion ?? string.Empty).Trim();
-
             Version current;
             Version remote;
-            if (Version.TryParse(normalizedCurrent, out current) && Version.TryParse(normalizedRemote, out remote))
+            if (TryParseLauncherVersion(currentVersion, out current) && TryParseLauncherVersion(remoteVersion, out remote))
             {
                 return remote > current;
+            }
+
+            string normalizedCurrent = (currentVersion ?? string.Empty).Trim();
+            string normalizedRemote = (remoteVersion ?? string.Empty).Trim();
+            if (normalizedRemote.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedRemote = normalizedRemote.Substring(1);
             }
 
             if (string.IsNullOrWhiteSpace(normalizedRemote))
@@ -570,6 +574,36 @@ namespace Wow_Launcher
             }
 
             return !string.Equals(normalizedCurrent, normalizedRemote, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool TryParseLauncherVersion(string versionText, out Version version)
+        {
+            version = null;
+
+            string normalized = (versionText ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return false;
+            }
+
+            if (normalized.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring(1);
+            }
+
+            string[] rawParts = normalized.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            if (rawParts.Length < 2 || rawParts.Length > 4 || rawParts.Any(part => !part.All(char.IsDigit)))
+            {
+                return Version.TryParse(normalized, out version);
+            }
+
+            var parts = rawParts.ToList();
+            while (parts.Count < 4)
+            {
+                parts.Add("0");
+            }
+
+            return Version.TryParse(string.Join(".", parts), out version);
         }
 
         private async Task<UpdateManifest> LoadManifestAsync(Uri manifestUri)
