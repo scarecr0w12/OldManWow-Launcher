@@ -2,6 +2,7 @@
 
 ## General Instructions
 - Treat this workspace as a brand new project and brand new git repository; do not rely on or discuss prior repo history unless explicitly asked.
+- Verify configured Git remotes before stating which remotes exist; this workspace is expected to use only a GitHub remote.
 - Do not assume the active Git remote/repository owner is relevant to the task unless explicitly stated by the user.
 - Avoid repeated progress/status messages when diagnosing a remote workflow failure; give a concise result and next action instead of looping on the same update.
 

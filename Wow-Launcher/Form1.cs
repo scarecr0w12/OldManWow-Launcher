@@ -26,6 +26,7 @@ namespace Wow_Launcher
         private const string ManifestUrl = "https://updates.oldmanwarcraft.com/updates/manifest.xml";
         private const string LauncherGitHubRepositorySettingName = "LauncherGitHubRepository";
         private const string LauncherGitHubApiBaseUrlSettingName = "LauncherGitHubApiBaseUrl";
+        private const string DefaultLauncherGitHubRepository = "scarecr0w12/OldManWow-Launcher";
         private const string DefaultGitHubApiBaseUrl = "https://api.github.com";
         private const string LauncherAssetName = "Wow-Launcher.exe";
         private const int MaxConcurrentDownloads = 4;
@@ -585,10 +586,10 @@ namespace Wow_Launcher
 
         private static string GetLauncherReleaseApiUrl()
         {
-            string repository = (GetAppSetting(LauncherGitHubRepositorySettingName) ?? string.Empty).Trim();
+            string repository = (GetAppSetting(LauncherGitHubRepositorySettingName) ?? DefaultLauncherGitHubRepository).Trim();
             if (string.IsNullOrWhiteSpace(repository) || string.Equals(repository, "owner/Wow-Launcher", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Configure LauncherGitHubRepository in App.config before using launcher self-updates.");
+                repository = DefaultLauncherGitHubRepository;
             }
 
             string[] segments = repository.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
