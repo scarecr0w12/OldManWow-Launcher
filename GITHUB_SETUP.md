@@ -12,10 +12,11 @@ This repository now includes GitHub Actions workflows for validation builds, aut
 - `.github/workflows/create-release-tag.yml`
   - runs on pushes to `main`
   - creates the next patch tag in the format `vX.Y.Z`
+  - dispatches the release workflow for the created tag
   - skips tagging when the commit message contains `[skip release]`
 
 - `.github/workflows/release.yml`
-  - runs when a `v*.*.*` tag is pushed
+  - runs when a `v*.*.*` tag is pushed or when dispatched by the tag workflow
   - stamps the launcher assembly version from the tag
   - builds `Wow-Launcher.exe`
   - publishes a GitHub Release with the launcher attached
@@ -68,7 +69,7 @@ The launcher now checks GitHub Releases at `releases/latest` and downloads the `
 1. Push changes to `main`.
 2. `CI` validates the Windows build.
 3. `Create Release Tag` creates the next patch tag unless the commit message contains `[skip release]`.
-4. The tag triggers `Release`.
+4. `Create Release Tag` dispatches `Release` for that tag.
 5. `Release` builds `Wow-Launcher.exe` and publishes it to GitHub Releases.
 
 ## Notes

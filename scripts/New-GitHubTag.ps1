@@ -47,6 +47,16 @@ function Get-ReleaseTagName {
     return '{0}{1}.{2}.{3}' -f $TagPrefix, $Version.Major, $Version.Minor, $Version.Build
 }
 
+function Set-ReleaseTagOutput {
+    param(
+        [string]$TagName
+    )
+
+    if (![string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "release_tag=$TagName"
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Repository) -or [string]::IsNullOrWhiteSpace($CommitSha)) {
     throw 'GitHub Actions environment variables are missing. Run this script from a branch workflow.'
 }
@@ -83,6 +93,7 @@ while ($true) {
 }
 
 if ($tags | Where-Object { $_.name -match $releaseTagPattern -and $_.commit -and $_.commit.sha -eq $CommitSha }) {
+    Set-ReleaseTagOutput -TagName ''
     Write-Host "Commit $CommitSha already has a release tag. Skipping tag creation."
     exit 0
 }
@@ -107,5 +118,17 @@ $body = @{
     sha = $CommitSha
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post -Uri $createRefEndpoint -Headers $headers -Body $body -ContentType 'application/json' | Out-Null
+try {
+    Invoke-RestMethod -Method Post -Uri $createRefEndpoint -Headers $headers -Body $body -ContentType 'application/json' | Out-Null
+}
+catch {
+    $message = $_.Exception.Message
+    if ($_.ErrorDetails -and ![string]::IsNullOrWhiteSpace($_.ErrorDetails.Message)) {
+        $message = $message + [Environment]::NewLine + $_.ErrorDetails.Message
+    }
+
+    throw $message
+}
+
+Set-ReleaseTagOutput -TagName $nextTagName
 Write-Host "Created release tag $nextTagName for commit $CommitSha"

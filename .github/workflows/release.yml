@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,28 +17,34 @@ permissions:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
       - name: Build release launcher
         shell: pwsh
-        run: .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts' -ReleaseVersion '${{ github.ref_name }}'
+        run: .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts' -ReleaseVersion '${{ env.RELEASE_TAG }}'
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Wow-Launcher-${{ github.ref_name }}
+          name: Wow-Launcher-${{ env.RELEASE_TAG }}
           path: artifacts/Wow-Launcher.exe
           if-no-files-found: error
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: Launcher ${{ github.ref_name }}
-          body: Automated launcher release for ${{ github.ref_name }}.
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Launcher ${{ env.RELEASE_TAG }}
+          body: Automated launcher release for ${{ env.RELEASE_TAG }}.
           files: artifacts/Wow-Launcher.exe
