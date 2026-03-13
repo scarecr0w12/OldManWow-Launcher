@@ -26,5 +26,20 @@ namespace Wow_Launcher.Properties
                 return defaultInstance;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ClientPath
+        {
+            get
+            {
+                return ((string)(this["ClientPath"]));
+            }
+            set
+            {
+                this["ClientPath"] = value;
+            }
+        }
     }
 }

@@ -37,6 +37,7 @@ namespace Wow_Launcher
         private bool launcherUpdateCheckStarted;
         private List<PendingUpdateFile> pendingFiles = new List<PendingUpdateFile>();
         private string skippedLauncherVersion;
+        private bool suppressClientPathPersistence;
 
         public Form1()
         {
@@ -54,6 +55,7 @@ namespace Wow_Launcher
             progressUpdate.Maximum = 100;
             SetStatusText("Ready");
             SetNewsText(DefaultNewsText);
+            InitializeClientPath();
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -88,7 +90,8 @@ namespace Wow_Launcher
             using (var dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "Select your World of Warcraft 3.3.5a client folder.";
-                dialog.SelectedPath = Directory.Exists(txtClientPath.Text) ? txtClientPath.Text : string.Empty;
+                string selectedClientPath = GetSelectedClientPath();
+                dialog.SelectedPath = Directory.Exists(selectedClientPath) ? selectedClientPath : string.Empty;
 
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
@@ -157,9 +160,127 @@ namespace Wow_Launcher
 
         private void txtClientPath_TextChanged(object sender, EventArgs e)
         {
+            if (suppressClientPathPersistence)
+            {
+                return;
+            }
+
+            string normalizedClientPath = NormalizeClientPath(txtClientPath.Text);
+            if (!string.Equals(txtClientPath.Text, normalizedClientPath, StringComparison.Ordinal))
+            {
+                SetClientPathText(normalizedClientPath);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedClientPath))
+            {
+                SaveClientPathPreference(string.Empty);
+            }
+            else if (Directory.Exists(normalizedClientPath))
+            {
+                SaveClientPathPreference(normalizedClientPath);
+            }
+
             ResetLauncherState(false);
             btnClearCache.Enabled = CanClearCache();
             btnLaunchGame.Enabled = CanLaunchGame();
+        }
+
+        private void InitializeClientPath()
+        {
+            string savedClientPath = NormalizeClientPath(Properties.Settings.Default.ClientPath);
+            if (Directory.Exists(savedClientPath))
+            {
+                SetClientPathText(savedClientPath);
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(savedClientPath))
+            {
+                SaveClientPathPreference(string.Empty);
+                AppendLog("Saved client path was not found and has been cleared.");
+            }
+
+            string detectedClientPath;
+            if (TryDetectClientPath(out detectedClientPath))
+            {
+                SetClientPathText(detectedClientPath);
+                SaveClientPathPreference(detectedClientPath);
+                AppendLog("Detected World of Warcraft client folder next to the launcher.");
+            }
+        }
+
+        private string GetSelectedClientPath()
+        {
+            return NormalizeClientPath(txtClientPath.Text);
+        }
+
+        private void SetClientPathText(string clientPath)
+        {
+            suppressClientPathPersistence = true;
+
+            try
+            {
+                txtClientPath.Text = clientPath;
+                txtClientPath.SelectionStart = txtClientPath.TextLength;
+            }
+            finally
+            {
+                suppressClientPathPersistence = false;
+            }
+
+            ResetLauncherState(false);
+            btnClearCache.Enabled = CanClearCache();
+            btnLaunchGame.Enabled = CanLaunchGame();
+        }
+
+        private void SaveClientPathPreference(string clientPath)
+        {
+            string normalizedClientPath = NormalizeClientPath(clientPath);
+            string currentSavedPath = NormalizeClientPath(Properties.Settings.Default.ClientPath);
+            if (string.Equals(currentSavedPath, normalizedClientPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            try
+            {
+                Properties.Settings.Default.ClientPath = normalizedClientPath;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Client path could not be saved: " + ex.Message);
+            }
+        }
+
+        private static string NormalizeClientPath(string clientPath)
+        {
+            string normalizedPath = (clientPath ?? string.Empty).Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                return string.Empty;
+            }
+
+            if (File.Exists(normalizedPath) && string.Equals(Path.GetFileName(normalizedPath), "Wow.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedPath = Path.GetDirectoryName(normalizedPath) ?? string.Empty;
+            }
+
+            return normalizedPath;
+        }
+
+        private static bool TryDetectClientPath(out string clientPath)
+        {
+            string startupPath = NormalizeClientPath(Application.StartupPath);
+            if (Directory.Exists(startupPath) && File.Exists(Path.Combine(startupPath, "Wow.exe")))
+            {
+                clientPath = startupPath;
+                return true;
+            }
+
+            clientPath = null;
+            return false;
         }
 
         private async Task CheckForUpdatesAsync()
@@ -350,11 +471,16 @@ namespace Wow_Launcher
 
         private bool TryGetInputs(out string clientPath, out Uri manifestUri)
         {
-            clientPath = txtClientPath.Text.Trim();
+            clientPath = GetSelectedClientPath();
             if (!Uri.TryCreate(ManifestUrl, UriKind.Absolute, out manifestUri) || (manifestUri.Scheme != Uri.UriSchemeHttp && manifestUri.Scheme != Uri.UriSchemeHttps))
             {
                 MessageBox.Show(this, "The hardcoded manifest URL is invalid.", "Invalid manifest URL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
+            }
+
+            if (!string.Equals(txtClientPath.Text, clientPath, StringComparison.Ordinal))
+            {
+                SetClientPathText(clientPath);
             }
 
             if (string.IsNullOrWhiteSpace(clientPath))
@@ -1069,7 +1195,8 @@ namespace Wow_Launcher
 
         private string TryGetLaunchFilePath()
         {
-            if (string.IsNullOrWhiteSpace(txtClientPath.Text) || !Directory.Exists(txtClientPath.Text))
+            string clientPath = GetSelectedClientPath();
+            if (string.IsNullOrWhiteSpace(clientPath) || !Directory.Exists(clientPath))
             {
                 return null;
             }
@@ -1081,7 +1208,7 @@ namespace Wow_Launcher
             try
             {
                 ValidateRelativePath(relativePath);
-                string launchPath = GetSafeLocalPath(txtClientPath.Text.Trim(), relativePath);
+                string launchPath = GetSafeLocalPath(clientPath, relativePath);
                 return File.Exists(launchPath) ? launchPath : null;
             }
             catch
@@ -1094,7 +1221,7 @@ namespace Wow_Launcher
         {
             cachePath = null;
 
-            string clientPath = txtClientPath.Text.Trim();
+            string clientPath = GetSelectedClientPath();
             if (string.IsNullOrWhiteSpace(clientPath) || !Directory.Exists(clientPath))
             {
                 return false;
