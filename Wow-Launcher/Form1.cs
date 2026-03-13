@@ -397,6 +397,7 @@ namespace Wow_Launcher
                                 });
 
                             int finishedFiles = Interlocked.Increment(ref completedFiles);
+                            AppendLog("Completed " + pendingFile.Entry.FilePath + ".");
                             SetStatusText(string.Format("Downloaded {0}/{1} file(s)...", finishedFiles, filesToDownload.Count));
                             UpdateProgress(totalBytes, Interlocked.Read(ref downloadedBytes), finishedFiles, filesToDownload.Count);
                         }
@@ -413,7 +414,16 @@ namespace Wow_Launcher
                 pendingFiles = await BuildPendingFileListAsync(clientPath, manifestUri, currentManifest);
                 UpdatePendingFilesList();
                 SetStatusText(pendingFiles.Count == 0 ? "Update complete." : "Update finished with remaining files.");
-                AppendLog("Update completed.");
+                AppendLog(pendingFiles.Count == 0 ? "All downloads completed successfully." : "Downloads finished, but some files still need attention.");
+
+                MessageBox.Show(
+                    this,
+                    pendingFiles.Count == 0
+                        ? "Client update finished successfully."
+                        : string.Format("Downloads finished, but {0} file(s) still require attention.", pendingFiles.Count),
+                    pendingFiles.Count == 0 ? "Update complete" : "Update finished",
+                    MessageBoxButtons.OK,
+                    pendingFiles.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
@@ -1111,15 +1121,17 @@ namespace Wow_Launcher
 
         private void UpdateProgress(long totalBytes, long downloadedBytes, int completedFiles, int fileCount)
         {
+            int fileProgress = (int)Math.Min(100, (completedFiles * 100L) / Math.Max(1, fileCount));
             int value;
 
             if (totalBytes > 0)
             {
-                value = (int)Math.Min(100, (downloadedBytes * 100L) / totalBytes);
+                int byteProgress = (int)Math.Min(100, (downloadedBytes * 100L) / totalBytes);
+                value = Math.Max(byteProgress, fileProgress);
             }
             else
             {
-                value = (int)Math.Min(100, (completedFiles * 100L) / Math.Max(1, fileCount));
+                value = fileProgress;
             }
 
             progressUpdate.Value = Math.Max(progressUpdate.Minimum, Math.Min(progressUpdate.Maximum, value));
