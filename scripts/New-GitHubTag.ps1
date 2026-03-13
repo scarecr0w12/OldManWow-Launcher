@@ -1,8 +1,6 @@
 param(
-    [string]$ApiUrl = 'https://api.github.com',
-    [string]$Repository = $env:GITHUB_REPOSITORY,
     [string]$CommitSha = $env:GITHUB_SHA,
-    [string]$Token = $env:GITHUB_TOKEN,
+    [string]$RemoteName = 'origin',
     [string]$TagPrefix = 'v',
     [string]$InitialVersion = '1.0.0'
 )
@@ -57,42 +55,31 @@ function Set-ReleaseTagOutput {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($Repository) -or [string]::IsNullOrWhiteSpace($CommitSha)) {
+if ([string]::IsNullOrWhiteSpace($CommitSha)) {
     throw 'GitHub Actions environment variables are missing. Run this script from a branch workflow.'
 }
 
-if ([string]::IsNullOrWhiteSpace($Token)) {
-    throw 'Missing GITHUB_TOKEN. Grant the workflow contents: write permissions before enabling automatic tagging.'
-}
-
-$headers = @{
-    Accept = 'application/vnd.github+json'
-    Authorization = "Bearer $Token"
-    'User-Agent' = 'Wow-Launcher-GitHub-Actions'
-    'X-GitHub-Api-Version' = '2022-11-28'
+if ([string]::IsNullOrWhiteSpace($RemoteName)) {
+    throw 'RemoteName is required.'
 }
 
 $releaseTagPattern = '^{0}\d+\.\d+\.\d+(\.\d+)?$' -f [System.Text.RegularExpressions.Regex]::Escape($TagPrefix)
-$tags = @()
-$page = 1
-
-while ($true) {
-    $tagsEndpoint = "$ApiUrl/repos/$Repository/tags?per_page=100&page=$page"
-    $pageTags = @(Invoke-RestMethod -Method Get -Uri $tagsEndpoint -Headers $headers)
-    if ($pageTags.Count -eq 0) {
-        break
-    }
-
-    $tags += $pageTags
-
-    if ($pageTags.Count -lt 100) {
-        break
-    }
-
-    $page += 1
+$remoteCheck = git remote get-url $RemoteName 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteCheck)) {
+    throw "Git remote '$RemoteName' was not found."
 }
 
-if ($tags | Where-Object { $_.name -match $releaseTagPattern -and $_.commit -and $_.commit.sha -eq $CommitSha }) {
+git fetch --force --tags $RemoteName | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Fetching tags from '$RemoteName' failed."
+}
+
+$existingCommitTags = @(git tag --points-at $CommitSha)
+if ($LASTEXITCODE -ne 0) {
+    throw "Reading tags for commit $CommitSha failed."
+}
+
+if ($existingCommitTags | Where-Object { $_ -match $releaseTagPattern }) {
     Set-ReleaseTagOutput -TagName ''
     Write-Host "Commit $CommitSha already has a release tag. Skipping tag creation."
     exit 0
@@ -103,8 +90,8 @@ if ($null -eq $latestVersion) {
     throw "InitialVersion '$InitialVersion' is invalid. Use semantic versions like 1.0.0."
 }
 
-foreach ($tag in $tags) {
-    $parsedVersion = Get-VersionObject -VersionText $tag.name
+foreach ($tag in @(git tag --list)) {
+    $parsedVersion = Get-VersionObject -VersionText $tag
     if ($null -ne $parsedVersion -and $parsedVersion -gt $latestVersion) {
         $latestVersion = $parsedVersion
     }
@@ -112,22 +99,15 @@ foreach ($tag in $tags) {
 
 $nextVersion = [Version]::new($latestVersion.Major, $latestVersion.Minor, $latestVersion.Build + 1, 0)
 $nextTagName = Get-ReleaseTagName -Version $nextVersion
-$createRefEndpoint = "$ApiUrl/repos/$Repository/git/refs"
-$body = @{
-    ref = "refs/tags/$nextTagName"
-    sha = $CommitSha
-} | ConvertTo-Json
 
-try {
-    Invoke-RestMethod -Method Post -Uri $createRefEndpoint -Headers $headers -Body $body -ContentType 'application/json' | Out-Null
+git tag $nextTagName $CommitSha
+if ($LASTEXITCODE -ne 0) {
+    throw "Creating tag $nextTagName for commit $CommitSha failed."
 }
-catch {
-    $message = $_.Exception.Message
-    if ($_.ErrorDetails -and ![string]::IsNullOrWhiteSpace($_.ErrorDetails.Message)) {
-        $message = $message + [Environment]::NewLine + $_.ErrorDetails.Message
-    }
 
-    throw $message
+git push $RemoteName "refs/tags/$nextTagName"
+if ($LASTEXITCODE -ne 0) {
+    throw "Pushing tag $nextTagName to '$RemoteName' failed."
 }
 
 Set-ReleaseTagOutput -TagName $nextTagName

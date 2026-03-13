@@ -21,13 +21,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Create next release tag
         id: create_tag
         shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .\scripts\New-GitHubTag.ps1 -Repository '${{ github.repository }}' -CommitSha '${{ github.sha }}' -Token $env:GITHUB_TOKEN
+        run: .\scripts\New-GitHubTag.ps1 -CommitSha '${{ github.sha }}' -RemoteName 'origin'
 
       - name: Trigger release workflow
         if: ${{ steps.create_tag.outputs.release_tag != '' }}
