@@ -5,18 +5,17 @@
 It targets `.NET Framework 4.7.2` and provides:
 
 - client file update checks from the hardcoded manifest URL `https://updates.oldmanwarcraft.com/updates/manifest.xml`
-- launcher self-updates from the latest GitLab release
+- launcher self-updates from the latest GitHub release
 - a built-in news panel powered by the manifest `breakingNewsUrl` feed
-- GitLab CI/CD automation for validation, tagging, release publishing, and launcher delivery
+- GitHub Actions automation for validation, tagging, release publishing, and launcher delivery
 
 ## Project Structure
 
 - `Wow-Launcher/` - Windows Forms application
 - `scripts/Build-Launcher.ps1` - local and CI build script
-- `scripts/New-GitLabTag.ps1` - automatic GitLab tag creation script
-- `scripts/Publish-GitLabRelease.ps1` - GitLab release publishing script
+- `scripts/New-GitHubTag.ps1` - automatic GitHub tag creation script
 - `scripts/Generate-Manifest.ps1` - client update manifest generator
-- `.gitlab-ci.yml` - GitLab CI/CD pipeline
+- `.github/workflows/` - GitHub Actions CI/CD workflows
 - `SERVER_SIDE_SETUP.md` - update hosting and deployment guide
 
 ## Runtime Update Architecture
@@ -38,7 +37,7 @@ The manifest controls:
 
 ### Launcher self-updates
 
-The launcher checks the latest GitLab release API for a release asset named:
+The launcher checks the latest GitHub release API for a release asset named:
 
 - `Wow-Launcher.exe`
 
@@ -49,7 +48,7 @@ When the release tag version is newer than the running assembly version, the lau
 - Windows
 - Visual Studio or Build Tools with `MSBuild.exe`
 - `.NET Framework 4.7.2` targeting pack
-- a Windows GitLab runner tagged `windows` for CI/CD
+- GitHub Actions enabled for the repository
 
 ## Local Development
 
@@ -82,6 +81,8 @@ By default, the manifest generator also writes:
 
 - `breakingNewsUrl` = `https://updates.oldmanwarcraft.com/updates/release-notes.json`
 
+It excludes launcher metadata files such as `manifest.xml`, `release-notes.json`, hidden files, system files, and dot-prefixed paths.
+
 ## News Feed Format
 
 The launcher expects `breakingNewsUrl` to point to a JSON feed containing `latest` and optional `history` entries.
@@ -92,20 +93,19 @@ Typical feed URL:
 
 See `SERVER_SIDE_SETUP.md` for a complete example.
 
-## GitLab CI/CD
+## GitHub Actions CI/CD
 
-The project uses `.gitlab-ci.yml` with these stages:
+The project uses these workflows:
 
-1. `verify`
-2. `tag`
-3. `build`
-4. `release`
+1. `CI`
+2. `Create Release Tag`
+3. `Release`
 
 ### Pipeline behavior
 
-- merge requests run the validation build
-- default-branch pushes run the validation build and then create the next launcher tag
-- tag pipelines build the launcher with the tag version and publish the GitLab release
+- pull requests run the validation build
+- pushes to `main` run validation and then create the next launcher tag
+- tag pushes build the launcher with the tag version and publish the GitHub release
 
 ### Automatic tagging
 
@@ -119,21 +119,21 @@ To skip automatic tag creation for a commit, include this in the commit message:
 
 - `[skip release]`
 
-### Required GitLab variables
+### Target GitHub repository
 
-Add this protected CI/CD variable in GitLab:
+The repository is configured for GitHub releases at:
 
-- `GITLAB_API_TOKEN` - token with API scope for tag creation and release publishing
+- `https://github.com/scarecr0w12/OldManWow-Launcher`
 
 ## Release Process
 
 ### Launcher release
 
-1. Push changes to the default branch.
-2. Let the `verify` job succeed.
-3. Let the `tag` job create the next `vX.Y.Z` tag.
-4. The tag pipeline builds `Wow-Launcher.exe`.
-5. The release job creates the GitLab release and attaches the launcher executable.
+1. Push changes to `main`.
+2. Let the `CI` workflow succeed.
+3. Let the `Create Release Tag` workflow create the next `vX.Y.Z` tag.
+4. The tag workflow builds `Wow-Launcher.exe`.
+5. The `Release` workflow creates the GitHub release and attaches the launcher executable.
 6. The launcher will detect the newer release automatically.
 
 ### Client patch release

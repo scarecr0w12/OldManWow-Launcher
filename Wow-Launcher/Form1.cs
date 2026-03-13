@@ -4,14 +4,18 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Xml.Linq;
 using System.Xml.Serialization;
 
 namespace Wow_Launcher
@@ -20,9 +24,11 @@ namespace Wow_Launcher
     {
         private const string ServerName = "Old Man Warcraft";
         private const string ManifestUrl = "https://updates.oldmanwarcraft.com/updates/manifest.xml";
-        private const string LauncherReleaseApiUrl = "https://gitlab.thecorehosting.net/api/v4/projects/root%2Fwow-launcher/releases/permalink/latest";
-        private const string LauncherReleaseProjectUrl = "https://gitlab.thecorehosting.net/root/wow-launcher";
+        private const string LauncherGitHubRepositorySettingName = "LauncherGitHubRepository";
+        private const string LauncherGitHubApiBaseUrlSettingName = "LauncherGitHubApiBaseUrl";
+        private const string DefaultGitHubApiBaseUrl = "https://api.github.com";
         private const string LauncherAssetName = "Wow-Launcher.exe";
+        private const int MaxConcurrentDownloads = 4;
         private const string DefaultNewsText = "Click Check Updates to load the latest " + ServerName + " news.";
 
         private readonly HttpClient httpClient = new HttpClient();
@@ -34,10 +40,13 @@ namespace Wow_Launcher
         public Form1()
         {
             InitializeComponent();
+            ConfigureHttpClient();
+            ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, MaxConcurrentDownloads + 2);
             DoubleBuffered = true;
             Shown += Form1_Shown;
             ApplyBranding();
             InitializeVisualStyle();
+            btnClearCache.Enabled = false;
             btnUpdateClient.Enabled = false;
             btnLaunchGame.Enabled = false;
             progressUpdate.Minimum = 0;
@@ -107,9 +116,48 @@ namespace Wow_Launcher
             }
         }
 
+        private void btnClearCache_Click(object sender, EventArgs e)
+        {
+            string cachePath;
+            if (!TryGetCacheDirectoryPath(out cachePath))
+            {
+                MessageBox.Show(this, "Select the local client folder first.", "Missing client folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!Directory.Exists(cachePath))
+            {
+                MessageBox.Show(this, "No Cache folder was found in the selected client directory.", "Cache not found", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                btnClearCache.Enabled = false;
+                return;
+            }
+
+            if (MessageBox.Show(this, "Delete the Cache folder from the selected client directory?", "Clear cache", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(cachePath, true);
+                ResetLauncherState(false);
+                SetStatusText("Cache cleared.");
+                btnLaunchGame.Enabled = CanLaunchGame();
+                btnClearCache.Enabled = CanClearCache();
+                AppendLog("Deleted Cache folder.");
+            }
+            catch (Exception ex)
+            {
+                SetStatusText("Cache clear failed.");
+                AppendLog("Cache clear failed: " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Cache clear failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void txtClientPath_TextChanged(object sender, EventArgs e)
         {
             ResetLauncherState(false);
+            btnClearCache.Enabled = CanClearCache();
             btnLaunchGame.Enabled = CanLaunchGame();
         }
 
@@ -133,9 +181,17 @@ namespace Wow_Launcher
             try
             {
                 currentManifest = await LoadManifestAsync(manifestUri);
-                if (await TryHandleLauncherUpdateAsync(true))
+
+                try
                 {
-                    return;
+                    if (await TryHandleLauncherUpdateAsync(true))
+                    {
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("Launcher update check skipped: " + ex.Message);
                 }
 
                 await LoadNewsAsync(currentManifest, manifestUri);
@@ -191,25 +247,44 @@ namespace Wow_Launcher
 
             SetBusyState(true, false);
             progressUpdate.Value = 0;
-            SetStatusText("Downloading updates...");
+            var filesToDownload = pendingFiles.ToList();
+            int concurrentDownloads = Math.Min(MaxConcurrentDownloads, Math.Max(1, filesToDownload.Count));
+            SetStatusText("Downloading updates with " + concurrentDownloads + " threads...");
 
             try
             {
-                long totalBytes = pendingFiles.Where(file => file.Entry.Size > 0).Sum(file => file.Entry.Size);
-                long completedBytes = 0;
+                long totalBytes = filesToDownload.Where(file => file.Entry.Size > 0).Sum(file => file.Entry.Size);
+                long downloadedBytes = 0;
+                int completedFiles = 0;
 
-                for (int index = 0; index < pendingFiles.Count; index++)
+                using (var downloadThrottle = new SemaphoreSlim(concurrentDownloads))
                 {
-                    var pendingFile = pendingFiles[index];
-                    SetStatusText(string.Format("Downloading {0} ({1}/{2})", pendingFile.Entry.FilePath, index + 1, pendingFiles.Count));
-                    AppendLog("Downloading " + pendingFile.Entry.FilePath + ".");
-
-                    await DownloadFileAsync(pendingFile, totalBytes, completedBytes, index, pendingFiles.Count);
-
-                    if (pendingFile.Entry.Size > 0)
+                    var downloadTasks = filesToDownload.Select(async pendingFile =>
                     {
-                        completedBytes += pendingFile.Entry.Size;
-                    }
+                        await downloadThrottle.WaitAsync();
+
+                        try
+                        {
+                            AppendLog("Downloading " + pendingFile.Entry.FilePath + ".");
+                            await DownloadFileAsync(
+                                pendingFile,
+                                bytesRead =>
+                                {
+                                    long currentBytes = Interlocked.Add(ref downloadedBytes, bytesRead);
+                                    UpdateProgress(totalBytes, currentBytes, Volatile.Read(ref completedFiles), filesToDownload.Count);
+                                });
+
+                            int finishedFiles = Interlocked.Increment(ref completedFiles);
+                            SetStatusText(string.Format("Downloaded {0}/{1} file(s)...", finishedFiles, filesToDownload.Count));
+                            UpdateProgress(totalBytes, Interlocked.Read(ref downloadedBytes), finishedFiles, filesToDownload.Count);
+                        }
+                        finally
+                        {
+                            downloadThrottle.Release();
+                        }
+                    }).ToList();
+
+                    await Task.WhenAll(downloadTasks);
                 }
 
                 progressUpdate.Value = 100;
@@ -250,6 +325,7 @@ namespace Wow_Launcher
         {
             btnBrowseClient.Enabled = !busy;
             btnCheckUpdates.Enabled = !busy;
+            btnClearCache.Enabled = !busy && CanClearCache();
             btnUpdateClient.Enabled = !busy && pendingFiles.Count > 0;
             btnLaunchGame.Enabled = !busy && CanLaunchGame();
             progressUpdate.Style = busy && checking ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
@@ -263,6 +339,12 @@ namespace Wow_Launcher
         private bool CanLaunchGame()
         {
             return !string.IsNullOrEmpty(TryGetLaunchFilePath());
+        }
+
+        private bool CanClearCache()
+        {
+            string cachePath;
+            return TryGetCacheDirectoryPath(out cachePath) && Directory.Exists(cachePath);
         }
 
         private bool TryGetInputs(out string clientPath, out Uri manifestUri)
@@ -325,7 +407,7 @@ namespace Wow_Launcher
             {
                 if (userInitiated)
                 {
-                    AppendLog("No launcher asset named " + LauncherAssetName + " was found in the latest GitLab release.");
+                    AppendLog("No launcher asset named " + LauncherAssetName + " was found in the latest GitHub release.");
                 }
 
                 return false;
@@ -464,44 +546,109 @@ namespace Wow_Launcher
             }
 
             ValidateRelativePath(pathOrUrl);
-            return new Uri(baseUri, pathOrUrl.Replace('\\', '/'));
+            string normalizedPath = string.Join(
+                "/",
+                pathOrUrl
+                    .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(Uri.EscapeDataString));
+
+            return new Uri(baseUri, normalizedPath);
         }
 
-        private async Task<GitLabRelease> LoadLatestLauncherReleaseAsync()
+        private void ConfigureHttpClient()
         {
-            using (var response = await httpClient.GetAsync(LauncherReleaseApiUrl))
+            httpClient.DefaultRequestHeaders.UserAgent.Clear();
+            httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("WowLauncher", "1.0"));
+
+            httpClient.DefaultRequestHeaders.Accept.Clear();
+            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        }
+
+        private async Task<GitHubRelease> LoadLatestLauncherReleaseAsync()
+        {
+            using (var latestResponse = await httpClient.GetAsync(GetLauncherReleaseApiUrl()))
             {
-                response.EnsureSuccessStatusCode();
-                using (var stream = await response.Content.ReadAsStreamAsync())
+                if (latestResponse.StatusCode == HttpStatusCode.NotFound)
                 {
-                    var serializer = new DataContractJsonSerializer(typeof(GitLabRelease));
-                    return serializer.ReadObject(stream) as GitLabRelease;
+                    return null;
+                }
+
+                latestResponse.EnsureSuccessStatusCode();
+                using (var stream = await latestResponse.Content.ReadAsStreamAsync())
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(GitHubRelease));
+                    return serializer.ReadObject(stream) as GitHubRelease;
                 }
             }
         }
 
-        private LauncherReleaseAsset GetLauncherAsset(GitLabRelease release)
+        private static string GetLauncherReleaseApiUrl()
         {
-            var links = release.Assets == null || release.Assets.Links == null
-                ? new List<GitLabAssetLink>()
-                : release.Assets.Links;
+            string repository = (GetAppSetting(LauncherGitHubRepositorySettingName) ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(repository) || string.Equals(repository, "owner/Wow-Launcher", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Configure LauncherGitHubRepository in App.config before using launcher self-updates.");
+            }
 
-            var matchingLink = links.FirstOrDefault(link =>
-                link != null
-                && (!string.IsNullOrWhiteSpace(link.Name) && string.Equals(link.Name.Trim(), LauncherAssetName, StringComparison.OrdinalIgnoreCase)
-                    || !string.IsNullOrWhiteSpace(link.Url) && link.Url.IndexOf(LauncherAssetName, StringComparison.OrdinalIgnoreCase) >= 0
-                    || !string.IsNullOrWhiteSpace(link.DirectAssetUrl) && link.DirectAssetUrl.IndexOf(LauncherAssetName, StringComparison.OrdinalIgnoreCase) >= 0));
+            string[] segments = repository.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length != 2 || segments.Any(string.IsNullOrWhiteSpace))
+            {
+                throw new InvalidOperationException("LauncherGitHubRepository must use the format 'owner/repository'.");
+            }
 
-            if (matchingLink == null)
+            string apiBaseUrl = (GetAppSetting(LauncherGitHubApiBaseUrlSettingName) ?? DefaultGitHubApiBaseUrl).Trim();
+            Uri baseUri;
+            if (!Uri.TryCreate(apiBaseUrl.EndsWith("/", StringComparison.Ordinal) ? apiBaseUrl : apiBaseUrl + "/", UriKind.Absolute, out baseUri))
+            {
+                throw new InvalidOperationException("LauncherGitHubApiBaseUrl in App.config is invalid.");
+            }
+
+            return new Uri(baseUri, "repos/" + segments[0] + "/" + segments[1] + "/releases/latest").ToString();
+        }
+
+        private static string GetAppSetting(string key)
+        {
+            string configurationFile = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile;
+            if (string.IsNullOrWhiteSpace(configurationFile) || !File.Exists(configurationFile))
             {
                 return null;
             }
 
-            Uri projectUri = new Uri(LauncherReleaseProjectUrl.TrimEnd('/') + "/");
+            var document = XDocument.Load(configurationFile);
+            var appSettings = document.Root == null ? null : document.Root.Element("appSettings");
+            if (appSettings == null)
+            {
+                return null;
+            }
+
+            var setting = appSettings.Elements("add")
+                .FirstOrDefault(element => string.Equals((string)element.Attribute("key"), key, StringComparison.Ordinal));
+
+            return setting == null ? null : (string)setting.Attribute("value");
+        }
+
+        private LauncherReleaseAsset GetLauncherAsset(GitHubRelease release)
+        {
+            var assets = release == null || release.Assets == null
+                ? new List<GitHubReleaseAsset>()
+                : release.Assets;
+
+            var matchingAsset = assets.FirstOrDefault(asset =>
+                asset != null
+                && (!string.IsNullOrWhiteSpace(asset.Name) && string.Equals(asset.Name.Trim(), LauncherAssetName, StringComparison.OrdinalIgnoreCase)
+                    || !string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl) && asset.BrowserDownloadUrl.IndexOf(LauncherAssetName, StringComparison.OrdinalIgnoreCase) >= 0
+                    || !string.IsNullOrWhiteSpace(asset.Url) && asset.Url.IndexOf(LauncherAssetName, StringComparison.OrdinalIgnoreCase) >= 0));
+
+            if (matchingAsset == null)
+            {
+                return null;
+            }
+
             Uri downloadUri;
 
-            if (!TryCreateAbsoluteUri(matchingLink.DirectAssetUrl, projectUri, out downloadUri)
-                && !TryCreateAbsoluteUri(matchingLink.Url, projectUri, out downloadUri))
+            if (!TryCreateAbsoluteUri(matchingAsset.BrowserDownloadUrl, null, out downloadUri)
+                && !TryCreateAbsoluteUri(matchingAsset.Url, null, out downloadUri))
             {
                 return null;
             }
@@ -513,7 +660,7 @@ namespace Wow_Launcher
             };
         }
 
-        private static string GetReleaseVersion(GitLabRelease release)
+        private static string GetReleaseVersion(GitHubRelease release)
         {
             string version = release == null ? null : release.TagName;
             if (string.IsNullOrWhiteSpace(version))
@@ -541,6 +688,11 @@ namespace Wow_Launcher
             if (Uri.TryCreate(candidate, UriKind.Absolute, out absoluteUri))
             {
                 return true;
+            }
+
+            if (baseUri == null)
+            {
+                return false;
             }
 
             return Uri.TryCreate(baseUri, candidate, out absoluteUri);
@@ -688,6 +840,12 @@ namespace Wow_Launcher
 
             foreach (var entry in manifest.Files.Where(file => !string.IsNullOrWhiteSpace(file.FilePath)))
             {
+                if (ContainsDotPrefixedPathSegment(entry.FilePath))
+                {
+                    AppendLog("Skipping manifest entry from dot-prefixed path: " + entry.FilePath + ".");
+                    continue;
+                }
+
                 ValidateRelativePath(entry.FilePath);
 
                 string localPath = GetSafeLocalPath(clientPath, entry.FilePath);
@@ -702,7 +860,7 @@ namespace Wow_Launcher
                 {
                     Entry = entry,
                     LocalPath = localPath,
-                    DownloadUri = new Uri(baseUri, entry.FilePath.Replace('\\', '/')),
+                    DownloadUri = GetRemoteFileUri(baseUri, entry.FilePath),
                     Reason = reason
                 });
             }
@@ -735,7 +893,7 @@ namespace Wow_Launcher
             return null;
         }
 
-        private async Task DownloadFileAsync(PendingUpdateFile pendingFile, long totalBytes, long completedBytes, int fileIndex, int fileCount)
+        private async Task DownloadFileAsync(PendingUpdateFile pendingFile, Action<int> reportBytesDownloaded)
         {
             string tempPath = pendingFile.LocalPath + ".download";
             string directory = Path.GetDirectoryName(pendingFile.LocalPath);
@@ -763,7 +921,10 @@ namespace Wow_Launcher
                         {
                             await targetStream.WriteAsync(buffer, 0, bytesRead);
                             fileBytesRead += bytesRead;
-                            UpdateProgress(totalBytes, completedBytes, fileBytesRead, remoteLength, fileIndex, fileCount);
+                            if (reportBytesDownloaded != null)
+                            {
+                                reportBytesDownloaded(bytesRead);
+                            }
                         }
                     }
                 }
@@ -795,23 +956,17 @@ namespace Wow_Launcher
             }
         }
 
-        private void UpdateProgress(long totalBytes, long completedBytes, long currentFileBytes, long currentFileLength, int fileIndex, int fileCount)
+        private void UpdateProgress(long totalBytes, long downloadedBytes, int completedFiles, int fileCount)
         {
             int value;
 
             if (totalBytes > 0)
             {
-                long overallBytes = completedBytes + currentFileBytes;
-                value = (int)Math.Min(100, (overallBytes * 100L) / totalBytes);
-            }
-            else if (currentFileLength > 0)
-            {
-                long fileProgress = (currentFileBytes * 100L) / currentFileLength;
-                value = (int)Math.Min(100, ((fileIndex * 100L) + fileProgress) / Math.Max(1, fileCount));
+                value = (int)Math.Min(100, (downloadedBytes * 100L) / totalBytes);
             }
             else
             {
-                value = (int)Math.Min(100, ((fileIndex + 1) * 100L) / Math.Max(1, fileCount));
+                value = (int)Math.Min(100, (completedFiles * 100L) / Math.Max(1, fileCount));
             }
 
             progressUpdate.Value = Math.Max(progressUpdate.Minimum, Math.Min(progressUpdate.Maximum, value));
@@ -873,6 +1028,18 @@ namespace Wow_Launcher
             }
         }
 
+        private static bool ContainsDotPrefixedPathSegment(string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return false;
+            }
+
+            return relativePath
+                .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => segment.StartsWith(".", StringComparison.Ordinal) && segment != "." && segment != "..");
+        }
+
         private string TryGetLaunchFilePath()
         {
             if (string.IsNullOrWhiteSpace(txtClientPath.Text) || !Directory.Exists(txtClientPath.Text))
@@ -896,12 +1063,34 @@ namespace Wow_Launcher
             }
         }
 
+        private bool TryGetCacheDirectoryPath(out string cachePath)
+        {
+            cachePath = null;
+
+            string clientPath = txtClientPath.Text.Trim();
+            if (string.IsNullOrWhiteSpace(clientPath) || !Directory.Exists(clientPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                cachePath = GetSafeLocalPath(clientPath, "Cache");
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void InitializeVisualStyle()
         {
             ConfigureActionButton(btnBrowseClient, Color.FromArgb(198, 162, 84), Color.FromArgb(221, 188, 114), Color.FromArgb(31, 24, 18));
             ConfigureActionButton(btnCheckUpdates, Color.FromArgb(198, 162, 84), Color.FromArgb(221, 188, 114), Color.FromArgb(31, 24, 18));
             ConfigureActionButton(btnUpdateClient, Color.FromArgb(198, 162, 84), Color.FromArgb(221, 188, 114), Color.FromArgb(31, 24, 18));
             ConfigureActionButton(btnLaunchGame, Color.FromArgb(118, 154, 82), Color.FromArgb(143, 183, 101), Color.FromArgb(21, 24, 18));
+            ConfigureActionButton(btnClearCache, Color.FromArgb(130, 92, 62), Color.FromArgb(158, 116, 83), Color.FromArgb(245, 235, 220));
             txtNews.DetectUrls = true;
             SetRemoteVersionText("-");
         }
@@ -939,7 +1128,7 @@ namespace Wow_Launcher
             {
                 lblStatusValue.ForeColor = Color.FromArgb(232, 109, 103);
             }
-            else if (lowerStatus.Contains("up to date") || lowerStatus.Contains("complete") || lowerStatus == "ready")
+            else if (lowerStatus.Contains("up to date") || lowerStatus.Contains("complete") || lowerStatus.Contains("cleared") || lowerStatus == "ready")
             {
                 lblStatusValue.ForeColor = Color.FromArgb(166, 208, 124);
             }
@@ -1214,117 +1403,5 @@ namespace Wow_Launcher
                 return BitConverter.ToString(hash).Replace("-", string.Empty);
             }
         }
-    }
-
-    [XmlRoot("manifest")]
-    public class UpdateManifest
-    {
-        [XmlElement("version")]
-        public string Version { get; set; }
-
-        [XmlElement("baseUrl")]
-        public string BaseUrl { get; set; }
-
-        [XmlElement("launchFile")]
-        public string LaunchFile { get; set; }
-
-        [XmlElement("breakingNewsUrl")]
-        public string BreakingNewsUrl { get; set; }
-
-        [XmlElement("news")]
-        public string NewsContent { get; set; }
-
-        [XmlArray("files")]
-        [XmlArrayItem("file")]
-        public List<UpdateFileEntry> Files { get; set; }
-    }
-
-    public class UpdateFileEntry
-    {
-        [XmlAttribute("path")]
-        public string FilePath { get; set; }
-
-        [XmlAttribute("sha256")]
-        public string Sha256 { get; set; }
-
-        [XmlAttribute("size")]
-        public long Size { get; set; }
-    }
-
-    public class PendingUpdateFile
-    {
-        public Uri DownloadUri { get; set; }
-
-        public UpdateFileEntry Entry { get; set; }
-
-        public string LocalPath { get; set; }
-
-        public string Reason { get; set; }
-    }
-
-    [DataContract]
-    public class ReleaseNotesFeed
-    {
-        [DataMember(Name = "latest")]
-        public ReleaseNotesEntry Latest { get; set; }
-
-        [DataMember(Name = "history")]
-        public List<ReleaseNotesEntry> History { get; set; }
-    }
-
-    [DataContract]
-    public class ReleaseNotesEntry
-    {
-        [DataMember(Name = "version")]
-        public string Version { get; set; }
-
-        [DataMember(Name = "created_at")]
-        public string CreatedAt { get; set; }
-
-        [DataMember(Name = "created_by")]
-        public string CreatedBy { get; set; }
-
-        [DataMember(Name = "release_notes")]
-        public string ReleaseNotes { get; set; }
-    }
-
-    [DataContract]
-    public class GitLabRelease
-    {
-        [DataMember(Name = "tag_name")]
-        public string TagName { get; set; }
-
-        [DataMember(Name = "name")]
-        public string Name { get; set; }
-
-        [DataMember(Name = "assets")]
-        public GitLabReleaseAssets Assets { get; set; }
-    }
-
-    [DataContract]
-    public class GitLabReleaseAssets
-    {
-        [DataMember(Name = "links")]
-        public List<GitLabAssetLink> Links { get; set; }
-    }
-
-    [DataContract]
-    public class GitLabAssetLink
-    {
-        [DataMember(Name = "name")]
-        public string Name { get; set; }
-
-        [DataMember(Name = "url")]
-        public string Url { get; set; }
-
-        [DataMember(Name = "direct_asset_url")]
-        public string DirectAssetUrl { get; set; }
-    }
-
-    public class LauncherReleaseAsset
-    {
-        public Uri DownloadUri { get; set; }
-
-        public string Version { get; set; }
     }
 }

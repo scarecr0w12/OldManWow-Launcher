@@ -7,14 +7,14 @@ It reflects the current launcher behavior:
 - the launcher always uses the hardcoded manifest URL `https://updates.oldmanwarcraft.com/updates/manifest.xml`
 - the launcher news panel reads `breakingNewsUrl` from the manifest
 - the expected news feed URL is `https://updates.oldmanwarcraft.com/updates/release-notes.json`
-- launcher self-updates come from the latest GitLab release asset named `Wow-Launcher.exe`
+- launcher self-updates come from the latest GitHub release asset named `Wow-Launcher.exe`
 
 ## Update System Overview
 
 There are two update flows:
 
 1. **Client content updates** are delivered by `manifest.xml` plus hosted patch files.
-2. **Launcher executable updates** are delivered by GitLab releases.
+2. **Launcher executable updates** are delivered by GitHub releases.
 
 ## Expected Update Host Layout
 
@@ -78,6 +78,8 @@ What the script does:
 
 - scans all files under the update root
 - skips `manifest.xml`
+- skips `release-notes.json`
+- skips hidden files, system files, and dot-prefixed paths such as `.curseclient`
 - writes file paths relative to the update root
 - computes SHA256 hashes
 - writes file sizes
@@ -117,50 +119,49 @@ The launcher can also fall back to plain text if the feed does not deserialize a
 
 ## Launcher Self-Update Requirements
 
-The launcher checks the latest public GitLab release using the GitLab API and looks for a release asset named:
+The launcher checks the latest public GitHub release using the GitHub Releases API and looks for a release asset named:
 
 - `Wow-Launcher.exe`
 
 Expected release shape:
 
 - Git tag such as `v1.0.1`
-- GitLab release for that tag
+- GitHub release for that tag
 - release asset link named `Wow-Launcher.exe`
 
 The launcher strips the leading `v` from the tag before comparing versions.
 
-## GitLab CI/CD Release Automation
+## GitHub Actions Release Automation
 
 The project now includes:
 
-- `.gitlab-ci.yml`
+- `.github/workflows/ci.yml`
+- `.github/workflows/create-release-tag.yml`
+- `.github/workflows/release.yml`
 - `scripts/Build-Launcher.ps1`
-- `scripts/New-GitLabTag.ps1`
-- `scripts/Publish-GitLabRelease.ps1`
+- `scripts/New-GitHubTag.ps1`
 
-### Pipeline stages
+### Workflows
 
-1. `verify`
-2. `tag`
-3. `build`
-4. `release`
+1. `CI`
+2. `Create Release Tag`
+3. `Release`
 
-### Pipeline behavior
+### Workflow behavior
 
-- merge requests run the validation build
-- default-branch pushes run validation and automatic tag creation
-- tag pipelines build the launcher, stamp the assembly version, and publish the GitLab release
+- pull requests run the validation build
+- pushes to `main` run validation and automatic tag creation
+- tag pushes build the launcher, stamp the assembly version, and publish the GitHub release
 
-### Required GitLab setup
+### Required GitHub setup
 
-1. Create a Windows runner with the tag `windows`.
-2. Make sure `MSBuild.exe` is available on that runner.
-3. Add a protected CI/CD variable named `GITLAB_API_TOKEN`.
-4. Use a token with API scope.
+1. Enable GitHub Actions for the repository.
+2. Make sure Actions permissions allow `GITHUB_TOKEN` to write repository contents.
+3. Confirm the workflows run on `windows-latest`.
 
 ### Skip automatic tagging
 
-To skip auto-tagging for a specific default-branch commit, add this to the commit message:
+To skip auto-tagging for a specific `main` branch commit, add this to the commit message:
 
 - `[skip release]`
 
@@ -168,10 +169,10 @@ To skip auto-tagging for a specific default-branch commit, add this to the commi
 
 ### Launcher executable
 
-1. Push the launcher changes to the default branch.
-2. Let the `verify` job pass.
-3. Let the `tag` job create the next `vX.Y.Z` launcher tag.
-4. Let the tag pipeline publish the GitLab release.
+1. Push the launcher changes to `main`.
+2. Let the `CI` workflow pass.
+3. Let the `Create Release Tag` workflow create the next `vX.Y.Z` launcher tag.
+4. Let the tag workflow publish the GitHub release.
 5. Confirm the release contains `Wow-Launcher.exe`.
 6. Test launcher self-update from an older launcher build.
 
@@ -261,6 +262,6 @@ Before publishing, verify:
 - hosted file sizes match the manifest
 - hosted file hashes match the manifest
 - the launcher news feed loads from `release-notes.json`
-- the GitLab release exposes `Wow-Launcher.exe`
+- the GitHub release exposes `Wow-Launcher.exe`
 - launcher self-update works from an older launcher build
 - the client launches successfully after patching

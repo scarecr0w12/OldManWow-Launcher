@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    tags-ignore:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build launcher
+        shell: pwsh
+        run: .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts'
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wow-Launcher
+          path: artifacts/Wow-Launcher.exe
+          if-no-files-found: error
