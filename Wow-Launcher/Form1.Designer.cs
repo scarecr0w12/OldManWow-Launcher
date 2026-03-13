@@ -29,6 +29,7 @@
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             this.pnlHeader = new System.Windows.Forms.Panel();
             this.pnlHeaderDivider = new System.Windows.Forms.Panel();
             this.lblRemoteVersionValue = new System.Windows.Forms.Label();
@@ -38,6 +39,7 @@
             this.lblSubtitle = new System.Windows.Forms.Label();
             this.lblTitle = new System.Windows.Forms.Label();
             this.grpConnection = new System.Windows.Forms.GroupBox();
+            this.btnClearCache = new System.Windows.Forms.Button();
             this.btnLaunchGame = new System.Windows.Forms.Button();
             this.btnUpdateClient = new System.Windows.Forms.Button();
             this.btnCheckUpdates = new System.Windows.Forms.Button();
@@ -157,6 +159,7 @@
             this.grpConnection.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpConnection.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(22)))), ((int)(((byte)(27)))), ((int)(((byte)(39)))));
+            this.grpConnection.Controls.Add(this.btnClearCache);
             this.grpConnection.Controls.Add(this.btnLaunchGame);
             this.grpConnection.Controls.Add(this.btnUpdateClient);
             this.grpConnection.Controls.Add(this.btnCheckUpdates);
@@ -172,6 +175,21 @@
             this.grpConnection.TabIndex = 1;
             this.grpConnection.TabStop = false;
             this.grpConnection.Text = "Adventure Setup";
+            // 
+            // btnClearCache
+            // 
+            this.btnClearCache.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(130)))), ((int)(((byte)(92)))), ((int)(((byte)(62)))));
+            this.btnClearCache.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(92)))), ((int)(((byte)(62)))), ((int)(((byte)(40)))));
+            this.btnClearCache.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnClearCache.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.btnClearCache.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(235)))), ((int)(((byte)(220)))));
+            this.btnClearCache.Location = new System.Drawing.Point(476, 119);
+            this.btnClearCache.Name = "btnClearCache";
+            this.btnClearCache.Size = new System.Drawing.Size(146, 34);
+            this.btnClearCache.TabIndex = 8;
+            this.btnClearCache.Text = "Clear Cache";
+            this.btnClearCache.UseVisualStyleBackColor = false;
+            this.btnClearCache.Click += new System.EventHandler(this.btnClearCache_Click);
             // 
             // btnLaunchGame
             // 
@@ -423,6 +441,7 @@
             this.Controls.Add(this.pnlHeader);
             this.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.ForeColor = System.Drawing.Color.Gainsboro;
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.MinimumSize = new System.Drawing.Size(1240, 773);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -442,6 +461,7 @@
 
         private System.Windows.Forms.Button btnBrowseClient;
         private System.Windows.Forms.Button btnCheckUpdates;
+        private System.Windows.Forms.Button btnClearCache;
         private System.Windows.Forms.Button btnLaunchGame;
         private System.Windows.Forms.Button btnUpdateClient;
         private System.Windows.Forms.GroupBox grpConnection;

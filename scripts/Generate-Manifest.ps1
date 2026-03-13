@@ -17,6 +17,33 @@ $ErrorActionPreference = 'Stop'
 $resolvedUpdateRoot = (Resolve-Path $UpdateRoot).Path.TrimEnd('\', '/')
 $manifestPath = Join-Path $resolvedUpdateRoot 'manifest.xml'
 
+function Test-IncludedManifestFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.FileInfo]$File,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RootPath
+    )
+
+    if ($File.Name -in @('manifest.xml', 'release-notes.json')) {
+        return $false
+    }
+
+    if (($File.Attributes -band [System.IO.FileAttributes]::Hidden) -or ($File.Attributes -band [System.IO.FileAttributes]::System)) {
+        return $false
+    }
+
+    $relativePath = $File.FullName.Substring($RootPath.Length + 1).Replace('\', '/')
+    foreach ($segment in $relativePath.Split('/')) {
+        if ($segment.StartsWith('.')) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 $settings = New-Object System.Xml.XmlWriterSettings
 $settings.Indent = $true
 $settings.Encoding = [System.Text.UTF8Encoding]::new($false)
@@ -37,7 +64,7 @@ try {
     $writer.WriteStartElement('files')
 
     Get-ChildItem -Path $resolvedUpdateRoot -File -Recurse |
-        Where-Object { $_.Name -ne 'manifest.xml' } |
+        Where-Object { Test-IncludedManifestFile -File $_ -RootPath $resolvedUpdateRoot } |
         Sort-Object FullName |
         ForEach-Object {
             $relativePath = $_.FullName.Substring($resolvedUpdateRoot.Length + 1).Replace('\', '/')
