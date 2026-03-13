@@ -904,6 +904,8 @@ namespace Wow_Launcher
 
             try
             {
+                DeleteFileIfExists(tempPath);
+
                 using (var response = await httpClient.GetAsync(pendingFile.DownloadUri, HttpCompletionOption.ResponseHeadersRead))
                 {
                     response.EnsureSuccessStatusCode();
@@ -938,21 +940,45 @@ namespace Wow_Launcher
                     }
                 }
 
-                if (File.Exists(pendingFile.LocalPath))
-                {
-                    File.Delete(pendingFile.LocalPath);
-                }
-
-                File.Move(tempPath, pendingFile.LocalPath);
+                ReplaceFile(tempPath, pendingFile.LocalPath);
             }
             catch
             {
-                if (File.Exists(tempPath))
-                {
-                    File.Delete(tempPath);
-                }
+                DeleteFileIfExists(tempPath);
 
                 throw;
+            }
+        }
+
+        private static void DeleteFileIfExists(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            ClearReadOnlyAttribute(path);
+            File.Delete(path);
+        }
+
+        private static void ReplaceFile(string sourcePath, string destinationPath)
+        {
+            if (!File.Exists(destinationPath))
+            {
+                File.Move(sourcePath, destinationPath);
+                return;
+            }
+
+            ClearReadOnlyAttribute(destinationPath);
+            File.Replace(sourcePath, destinationPath, null, true);
+        }
+
+        private static void ClearReadOnlyAttribute(string path)
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
             }
         }
 
