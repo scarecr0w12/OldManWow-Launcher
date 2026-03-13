@@ -48,3 +48,24 @@ jobs:
           name: Launcher ${{ env.RELEASE_TAG }}
           body: Automated launcher release for ${{ env.RELEASE_TAG }}.
           files: artifacts/Wow-Launcher.exe
+
+      - name: Sync assembly version to main
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          .\scripts\Set-AssemblyVersion.ps1 -AssemblyInfoPath 'Wow-Launcher\Properties\AssemblyInfo.cs' -ReleaseVersion '${{ env.RELEASE_TAG }}'
+
+          git diff --quiet --exit-code -- 'Wow-Launcher/Properties/AssemblyInfo.cs'
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host 'Assembly version is already synced on main.'
+              exit 0
+          }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Wow-Launcher/Properties/AssemblyInfo.cs'
+          git commit -m 'Sync assembly version to ${{ env.RELEASE_TAG }} [skip release]'
+          git push origin HEAD:main
