@@ -32,6 +32,10 @@ jobs:
 
       - name: Build release launcher
         shell: pwsh
+        env:
+          CODE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.CODE_SIGNING_CERTIFICATE_BASE64 }}
+          CODE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.CODE_SIGNING_CERTIFICATE_PASSWORD }}
+          CODE_SIGNING_TIMESTAMP_URL: ${{ secrets.CODE_SIGNING_TIMESTAMP_URL }}
         run: .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts' -ReleaseVersion '${{ env.RELEASE_TAG }}'
 
       - name: Upload release artifact

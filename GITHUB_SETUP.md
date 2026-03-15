@@ -46,6 +46,16 @@ In the GitHub repository settings:
 
 The release-tag workflow requires `contents: write` so it can create tags.
 
+### Release signing secrets
+
+To reduce Windows `Unknown publisher` and SmartScreen warnings for public downloads, add these repository or environment secrets:
+
+- `CODE_SIGNING_CERTIFICATE_BASE64` - base64-encoded `.pfx` certificate
+- `CODE_SIGNING_CERTIFICATE_PASSWORD` - optional `.pfx` password
+- `CODE_SIGNING_TIMESTAMP_URL` - optional timestamp URL
+
+The release workflow passes these secrets into `scripts/Build-Launcher.ps1`, which signs `artifacts/Wow-Launcher.exe` before publishing the release.
+
 ## Launcher self-updater configuration
 
 Set the target GitHub repository in `Wow-Launcher/App.config`:

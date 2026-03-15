@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("Wow-Launcher")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("Old Man Warcraft Launcher")]
+[assembly: AssemblyDescription("Launcher for Old Man Warcraft")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("Wow-Launcher")]
-[assembly: AssemblyCopyright("Copyright ©  2026")]
+[assembly: AssemblyCompany("Old Man Warcraft")]
+[assembly: AssemblyProduct("Old Man Warcraft Launcher")]
+[assembly: AssemblyCopyright("Copyright © Old Man Warcraft 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

@@ -71,6 +71,27 @@ When the release tag version is newer than the running assembly version, the lau
 
 This temporarily stamps `AssemblyVersion`, `AssemblyFileVersion`, and `AssemblyInformationalVersion` during the build.
 
+### Code signing release builds
+
+Unsigned Windows executables trigger `Unknown publisher` and SmartScreen warnings. The build script now signs `artifacts/Wow-Launcher.exe` when a code-signing certificate is provided.
+
+Supported inputs:
+
+- `CODE_SIGNING_CERTIFICATE_PATH` - path to a `.pfx` file
+- `CODE_SIGNING_CERTIFICATE_BASE64` - base64-encoded `.pfx` content for CI secrets
+- `CODE_SIGNING_CERTIFICATE_PASSWORD` - optional `.pfx` password
+- `CODE_SIGNING_TIMESTAMP_URL` - optional RFC3161 timestamp URL, defaults to `http://timestamp.digicert.com`
+
+Example local signed build:
+
+```powershell
+$env:CODE_SIGNING_CERTIFICATE_PATH = 'C:\secure\old-man-warcraft-signing.pfx'
+$env:CODE_SIGNING_CERTIFICATE_PASSWORD = '***'
+.\scripts\Build-Launcher.ps1 -ReleaseVersion v1.0.1
+```
+
+Signing removes the `Unknown publisher` prompt, but SmartScreen reputation can still take time to build for a newly issued certificate or a newly published binary.
+
 ## Manifest Generation
 
 Generate `manifest.xml` from a prepared update folder:
@@ -126,6 +147,8 @@ The repository now also includes a `.gitlab-ci.yml` pipeline for Windows runners
 
 - `CI_JOB_TOKEN` can be used when the GitLab instance allows job-token access to tags and releases
 - otherwise set a protected masked `GITLAB_TOKEN` with `api` scope for tag and release creation
+- set `CODE_SIGNING_CERTIFICATE_BASE64` and `CODE_SIGNING_CERTIFICATE_PASSWORD` to sign release artifacts and reduce Windows security warnings
+- optionally set `CODE_SIGNING_TIMESTAMP_URL` to override the default timestamp server
 
 ### Runner requirements
 
