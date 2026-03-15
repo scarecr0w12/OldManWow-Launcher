@@ -45,6 +45,10 @@
             this.btnCheckUpdates = new System.Windows.Forms.Button();
             this.btnBrowseClient = new System.Windows.Forms.Button();
             this.txtClientPath = new System.Windows.Forms.TextBox();
+            this.lblOnlinePlayerCountValue = new System.Windows.Forms.Label();
+            this.lblOnlinePlayerCount = new System.Windows.Forms.Label();
+            this.lblRealmStatusIndicatorValue = new System.Windows.Forms.Label();
+            this.lblRealmStatusIndicator = new System.Windows.Forms.Label();
             this.lblClientPath = new System.Windows.Forms.Label();
             this.lblClientHint = new System.Windows.Forms.Label();
             this.grpNews = new System.Windows.Forms.GroupBox();
@@ -165,6 +169,10 @@
             this.grpConnection.Controls.Add(this.btnCheckUpdates);
             this.grpConnection.Controls.Add(this.btnBrowseClient);
             this.grpConnection.Controls.Add(this.txtClientPath);
+            this.grpConnection.Controls.Add(this.lblOnlinePlayerCountValue);
+            this.grpConnection.Controls.Add(this.lblOnlinePlayerCount);
+            this.grpConnection.Controls.Add(this.lblRealmStatusIndicatorValue);
+            this.grpConnection.Controls.Add(this.lblRealmStatusIndicator);
             this.grpConnection.Controls.Add(this.lblClientPath);
             this.grpConnection.Controls.Add(this.lblClientHint);
             this.grpConnection.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
@@ -265,6 +273,54 @@
             this.txtClientPath.Size = new System.Drawing.Size(634, 23);
             this.txtClientPath.TabIndex = 3;
             this.txtClientPath.TextChanged += new System.EventHandler(this.txtClientPath_TextChanged);
+            // 
+            // lblOnlinePlayerCountValue
+            // 
+            this.lblOnlinePlayerCountValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblOnlinePlayerCountValue.AutoSize = true;
+            this.lblOnlinePlayerCountValue.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblOnlinePlayerCountValue.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(239)))), ((int)(((byte)(203)))), ((int)(((byte)(110)))));
+            this.lblOnlinePlayerCountValue.Location = new System.Drawing.Point(630, 50);
+            this.lblOnlinePlayerCountValue.Name = "lblOnlinePlayerCountValue";
+            this.lblOnlinePlayerCountValue.Size = new System.Drawing.Size(14, 20);
+            this.lblOnlinePlayerCountValue.TabIndex = 12;
+            this.lblOnlinePlayerCountValue.Text = "-";
+            // 
+            // lblOnlinePlayerCount
+            // 
+            this.lblOnlinePlayerCount.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblOnlinePlayerCount.AutoSize = true;
+            this.lblOnlinePlayerCount.Font = new System.Drawing.Font("Segoe UI", 8.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblOnlinePlayerCount.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(170)))), ((int)(((byte)(158)))), ((int)(((byte)(139)))));
+            this.lblOnlinePlayerCount.Location = new System.Drawing.Point(631, 29);
+            this.lblOnlinePlayerCount.Name = "lblOnlinePlayerCount";
+            this.lblOnlinePlayerCount.Size = new System.Drawing.Size(100, 15);
+            this.lblOnlinePlayerCount.TabIndex = 11;
+            this.lblOnlinePlayerCount.Text = "ONLINE PLAYERS";
+            // 
+            // lblRealmStatusIndicatorValue
+            // 
+            this.lblRealmStatusIndicatorValue.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblRealmStatusIndicatorValue.AutoSize = true;
+            this.lblRealmStatusIndicatorValue.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblRealmStatusIndicatorValue.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(239)))), ((int)(((byte)(203)))), ((int)(((byte)(110)))));
+            this.lblRealmStatusIndicatorValue.Location = new System.Drawing.Point(493, 50);
+            this.lblRealmStatusIndicatorValue.Name = "lblRealmStatusIndicatorValue";
+            this.lblRealmStatusIndicatorValue.Size = new System.Drawing.Size(73, 20);
+            this.lblRealmStatusIndicatorValue.TabIndex = 10;
+            this.lblRealmStatusIndicatorValue.Text = "Checking";
+            // 
+            // lblRealmStatusIndicator
+            // 
+            this.lblRealmStatusIndicator.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblRealmStatusIndicator.AutoSize = true;
+            this.lblRealmStatusIndicator.Font = new System.Drawing.Font("Segoe UI", 8.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblRealmStatusIndicator.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(170)))), ((int)(((byte)(158)))), ((int)(((byte)(139)))));
+            this.lblRealmStatusIndicator.Location = new System.Drawing.Point(494, 29);
+            this.lblRealmStatusIndicator.Name = "lblRealmStatusIndicator";
+            this.lblRealmStatusIndicator.Size = new System.Drawing.Size(90, 15);
+            this.lblRealmStatusIndicator.TabIndex = 9;
+            this.lblRealmStatusIndicator.Text = "REALM STATUS";
             // 
             // lblClientPath
             // 
@@ -472,6 +528,10 @@
         private System.Windows.Forms.Label lblFilesToUpdate;
         private System.Windows.Forms.Label lblLog;
         private System.Windows.Forms.Label lblNewsHint;
+        private System.Windows.Forms.Label lblOnlinePlayerCount;
+        private System.Windows.Forms.Label lblOnlinePlayerCountValue;
+        private System.Windows.Forms.Label lblRealmStatusIndicator;
+        private System.Windows.Forms.Label lblRealmStatusIndicatorValue;
         private System.Windows.Forms.Label lblRemoteVersion;
         private System.Windows.Forms.Label lblRemoteVersionValue;
         private System.Windows.Forms.Label lblStatus;

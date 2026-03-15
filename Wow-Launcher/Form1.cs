@@ -29,6 +29,8 @@ namespace Wow_Launcher
         private const string DefaultLauncherGitHubRepository = "scarecr0w12/OldManWow-Launcher";
         private const string DefaultGitHubApiBaseUrl = "https://api.github.com";
         private const string LauncherAssetName = "Wow-Launcher.exe";
+        private const string RealmStatusApiUrl = "http://140.150.202.236:8081/api/server";
+        private const string RealmStatusApiKey = "sadlkjflasdkjg438gh";
         private const int MaxConcurrentDownloads = 4;
         private const string DefaultNewsText = "Click Check Updates to load the latest " + ServerName + " news.";
 
@@ -54,6 +56,8 @@ namespace Wow_Launcher
             progressUpdate.Minimum = 0;
             progressUpdate.Maximum = 100;
             SetStatusText("Ready");
+            SetRealmStatusIndicator("Checking...");
+            SetOnlinePlayerCountText("-");
             SetNewsText(DefaultNewsText);
             InitializeClientPath();
         }
@@ -72,11 +76,13 @@ namespace Wow_Launcher
             }
 
             launcherUpdateCheckStarted = true;
+            await RefreshRealmStatusAsync();
             await CheckForLauncherUpdatesAsync(false);
         }
 
         private async void btnCheckUpdates_Click(object sender, EventArgs e)
         {
+            await RefreshRealmStatusAsync();
             await CheckForUpdatesAsync();
         }
 
@@ -1265,7 +1271,6 @@ namespace Wow_Launcher
         {
             Text = ServerName + " Launcher";
             lblTitle.Text = ServerName;
-            lblSubtitle.Text = "Wrath of the Lich King 3.3.5a launcher for patches, realm news, and your next adventure.";
             grpConnection.Text = ServerName + " Client";
             lblClientHint.Text = "Choose your 3.3.5a client folder, sync with " + ServerName + ", then enter the realm.";
             grpNews.Text = ServerName + " News";
@@ -1273,6 +1278,135 @@ namespace Wow_Launcher
             grpUpdates.Text = ServerName + " Operations";
             lblUpdatesHint.Text = "Track downloads, pending files, and live launcher activity for " + ServerName + ".";
             lblRemoteVersion.Text = "OLD MAN WARCRAFT BUILD";
+            lblRealmStatusIndicator.Text = ServerName.ToUpperInvariant() + " STATUS";
+            UpdateSubtitleText();
+        }
+
+        private async Task RefreshRealmStatusAsync()
+        {
+            try
+            {
+                AppendLog("Checking realm status.");
+                var realmStatus = await LoadRealmStatusAsync();
+                SetRealmStatusIndicator("Online");
+                SetOnlinePlayerCountText(BuildOnlinePlayerCountText(realmStatus));
+                AppendLog("Realm is online. " + BuildRealmStatusLogMessage(realmStatus));
+            }
+            catch (Exception ex)
+            {
+                SetRealmStatusIndicator("Offline");
+                SetOnlinePlayerCountText("-");
+                AppendLog("Realm status check failed: " + ex.Message);
+            }
+        }
+
+        private async Task<RealmStatusResponse> LoadRealmStatusAsync()
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, RealmStatusApiUrl))
+            {
+                request.Headers.Add("X-API-Key", RealmStatusApiKey);
+
+                using (var response = await httpClient.SendAsync(request))
+                {
+                    response.EnsureSuccessStatusCode();
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    {
+                        var serializer = new DataContractJsonSerializer(typeof(RealmStatusResponse));
+                        var realmStatus = serializer.ReadObject(stream) as RealmStatusResponse;
+                        if (realmStatus == null)
+                        {
+                            throw new InvalidOperationException("The realm status response was empty.");
+                        }
+
+                        return realmStatus;
+                    }
+                }
+            }
+        }
+
+        private void UpdateSubtitleText()
+        {
+            lblSubtitle.Text = string.Format(
+                "Wrath of the Lich King 3.3.5a launcher for patches, realm news, and your next adventure. Launcher v{0}",
+                GetCurrentLauncherDisplayVersion());
+        }
+
+        private static string GetCurrentLauncherDisplayVersion()
+        {
+            var informationalVersion = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+            string version = informationalVersion == null ? null : informationalVersion.InformationalVersion;
+            return string.IsNullOrWhiteSpace(version) ? GetCurrentLauncherVersion() : version.Trim();
+        }
+
+        private void SetRealmStatusIndicator(string statusText)
+        {
+            string normalized = string.IsNullOrWhiteSpace(statusText) ? "Unknown" : statusText.Trim();
+            lblRealmStatusIndicatorValue.Text = normalized;
+
+            string lowerStatus = normalized.ToLowerInvariant();
+            if (lowerStatus == "online")
+            {
+                lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(166, 208, 124);
+            }
+            else if (lowerStatus == "offline")
+            {
+                lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(232, 109, 103);
+            }
+            else if (lowerStatus.Contains("check"))
+            {
+                lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(239, 203, 110);
+            }
+            else
+            {
+                lblRealmStatusIndicatorValue.ForeColor = Color.WhiteSmoke;
+            }
+        }
+
+        private void SetOnlinePlayerCountText(string playerCountText)
+        {
+            string normalized = string.IsNullOrWhiteSpace(playerCountText) ? "-" : playerCountText.Trim();
+            lblOnlinePlayerCountValue.Text = normalized;
+            lblOnlinePlayerCountValue.ForeColor = normalized == "-"
+                ? Color.FromArgb(186, 184, 176)
+                : Color.FromArgb(239, 203, 110);
+        }
+
+        private static string BuildOnlinePlayerCountText(RealmStatusResponse realmStatus)
+        {
+            if (realmStatus == null)
+            {
+                return "-";
+            }
+
+            int maxPlayerCount = Math.Max(realmStatus.PlayerCount, realmStatus.MaxPlayerCount);
+            return maxPlayerCount > 0
+                ? string.Format("{0}/{1}", realmStatus.PlayerCount, maxPlayerCount)
+                : realmStatus.PlayerCount.ToString();
+        }
+
+        private static string BuildRealmStatusLogMessage(RealmStatusResponse realmStatus)
+        {
+            if (realmStatus == null)
+            {
+                return "Realm status unavailable.";
+            }
+
+            var details = new List<string>
+            {
+                string.Format("Players: {0}/{1}", realmStatus.PlayerCount, Math.Max(realmStatus.PlayerCount, realmStatus.MaxPlayerCount))
+            };
+
+            if (realmStatus.QueuedSessions > 0)
+            {
+                details.Add("Queue: " + realmStatus.QueuedSessions);
+            }
+
+            if (!string.IsNullOrWhiteSpace(realmStatus.UptimeFormatted))
+            {
+                details.Add("Uptime: " + realmStatus.UptimeFormatted.Trim());
+            }
+
+            return string.Join(" | ", details);
         }
 
         private static void ConfigureActionButton(Button button, Color backColor, Color hoverColor, Color textColor)

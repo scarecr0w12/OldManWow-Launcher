@@ -62,6 +62,22 @@ namespace Wow_Launcher
     }
 
     [DataContract]
+    public class RealmStatusResponse
+    {
+        [DataMember(Name = "player_count")]
+        public int PlayerCount { get; set; }
+
+        [DataMember(Name = "max_player_count")]
+        public int MaxPlayerCount { get; set; }
+
+        [DataMember(Name = "queued_sessions")]
+        public int QueuedSessions { get; set; }
+
+        [DataMember(Name = "uptime_formatted")]
+        public string UptimeFormatted { get; set; }
+    }
+
+    [DataContract]
     public class ReleaseNotesEntry
     {
         [DataMember(Name = "version")]
