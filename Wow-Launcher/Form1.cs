@@ -32,18 +32,43 @@ namespace Wow_Launcher
         private const string RealmStatusApiUrl = "http://140.150.202.236:8081/api/server";
         private const string RealmStatusApiKey = "sadlkjflasdkjg438gh";
         private const int MaxConcurrentDownloads = 4;
-        private const string DefaultNewsText = "Click Check Updates to load the latest " + ServerName + " news.";
 
         private readonly HttpClient httpClient = new HttpClient();
         private UpdateManifest currentManifest;
         private bool launcherUpdateCheckStarted;
         private List<PendingUpdateFile> pendingFiles = new List<PendingUpdateFile>();
         private string skippedLauncherVersion;
+        private string currentLanguageCode;
         private bool suppressClientPathPersistence;
+        private bool suppressLanguageSelectionPersistence;
+        private string currentStatusText;
+        private StatusTone currentStatusTone = StatusTone.Neutral;
+        private RealmStatusState currentRealmStatusState = RealmStatusState.Checking;
+        private string currentOnlinePlayerCountText = "-";
+        private string currentRemoteVersionText = "-";
+        private string currentNewsMessage;
+        private ReleaseNotesFeed currentReleaseNotes;
+
+        private enum StatusTone
+        {
+            Neutral,
+            Success,
+            Warning,
+            Error
+        }
+
+        private enum RealmStatusState
+        {
+            Unknown,
+            Checking,
+            Online,
+            Offline
+        }
 
         public Form1()
         {
             InitializeComponent();
+            InitializeLanguageSelection();
             ConfigureHttpClient();
             ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, MaxConcurrentDownloads + 2);
             DoubleBuffered = true;
@@ -55,10 +80,10 @@ namespace Wow_Launcher
             btnLaunchGame.Enabled = false;
             progressUpdate.Minimum = 0;
             progressUpdate.Maximum = 100;
-            SetStatusText("Ready");
-            SetRealmStatusIndicator("Checking...");
+            SetStatusText(L("Ready"), StatusTone.Success);
+            SetRealmStatusIndicator(RealmStatusState.Checking);
             SetOnlinePlayerCountText("-");
-            SetNewsText(DefaultNewsText);
+            SetNewsText(null);
             InitializeClientPath();
         }
 
@@ -95,7 +120,7 @@ namespace Wow_Launcher
         {
             using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "Select your World of Warcraft 3.3.5a client folder.";
+                dialog.Description = L("SelectClientFolderDescription");
                 string selectedClientPath = GetSelectedClientPath();
                 dialog.SelectedPath = Directory.Exists(selectedClientPath) ? selectedClientPath : string.Empty;
 
@@ -113,7 +138,7 @@ namespace Wow_Launcher
                 var launchPath = TryGetLaunchFilePath();
                 if (string.IsNullOrEmpty(launchPath))
                 {
-                    MessageBox.Show(this, "Could not find the game executable in the selected folder.", "Launch failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, L("LaunchFileNotFound"), L("LaunchFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
@@ -122,7 +147,7 @@ namespace Wow_Launcher
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "Launch failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, L("LaunchFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -131,18 +156,18 @@ namespace Wow_Launcher
             string cachePath;
             if (!TryGetCacheDirectoryPath(out cachePath))
             {
-                MessageBox.Show(this, "Select the local client folder first.", "Missing client folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, L("MissingClientFolderMessage"), L("MissingClientFolderTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             if (!Directory.Exists(cachePath))
             {
-                MessageBox.Show(this, "No Cache folder was found in the selected client directory.", "Cache not found", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, L("CacheNotFoundMessage"), L("CacheNotFoundTitle"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 btnClearCache.Enabled = false;
                 return;
             }
 
-            if (MessageBox.Show(this, "Delete the Cache folder from the selected client directory?", "Clear cache", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            if (MessageBox.Show(this, L("ClearCacheConfirm"), L("ClearCacheTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 return;
             }
@@ -151,16 +176,16 @@ namespace Wow_Launcher
             {
                 Directory.Delete(cachePath, true);
                 ResetLauncherState(false);
-                SetStatusText("Cache cleared.");
+                SetStatusText(L("CacheCleared"), StatusTone.Success);
                 btnLaunchGame.Enabled = CanLaunchGame();
                 btnClearCache.Enabled = CanClearCache();
                 AppendLog("Deleted Cache folder.");
             }
             catch (Exception ex)
             {
-                SetStatusText("Cache clear failed.");
+                SetStatusText(L("CacheClearFailed"), StatusTone.Error);
                 AppendLog("Cache clear failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "Cache clear failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, L("CacheClearTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -190,6 +215,125 @@ namespace Wow_Launcher
             ResetLauncherState(false);
             btnClearCache.Enabled = CanClearCache();
             btnLaunchGame.Enabled = CanLaunchGame();
+        }
+
+        private void cmbLanguage_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (suppressLanguageSelectionPersistence)
+            {
+                return;
+            }
+
+            var selectedLanguageCode = cmbLanguage.SelectedValue as string;
+            if (!string.IsNullOrWhiteSpace(selectedLanguageCode) && !string.Equals(currentLanguageCode, selectedLanguageCode, StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyLanguage(selectedLanguageCode, true);
+            }
+        }
+
+        private string L(string key)
+        {
+            return AppLocalization.Get(key, currentLanguageCode);
+        }
+
+        private string LF(string key, params object[] args)
+        {
+            return AppLocalization.Format(key, currentLanguageCode, args);
+        }
+
+        private string GetDefaultNewsText()
+        {
+            return LF("DefaultNewsTextFormat", ServerName);
+        }
+
+        private void InitializeLanguageSelection()
+        {
+            suppressLanguageSelectionPersistence = true;
+
+            try
+            {
+                cmbLanguage.DisplayMember = "DisplayName";
+                cmbLanguage.ValueMember = "Code";
+                cmbLanguage.DataSource = AppLocalization.GetSupportedLanguages().ToList();
+            }
+            finally
+            {
+                suppressLanguageSelectionPersistence = false;
+            }
+
+            ApplyLanguage(AppLocalization.ResolveLanguageCode(Properties.Settings.Default.LanguageCode), false);
+        }
+
+        private void ApplyLanguage(string languageCode, bool persistPreference)
+        {
+            currentLanguageCode = AppLocalization.ResolveLanguageCode(languageCode);
+            AppLocalization.ApplyCulture(currentLanguageCode);
+
+            suppressLanguageSelectionPersistence = true;
+
+            try
+            {
+                cmbLanguage.SelectedValue = currentLanguageCode;
+            }
+            finally
+            {
+                suppressLanguageSelectionPersistence = false;
+            }
+
+            ApplyLocalizedText();
+
+            if (persistPreference)
+            {
+                SaveLanguagePreference(currentLanguageCode);
+            }
+        }
+
+        private void SaveLanguagePreference(string languageCode)
+        {
+            if (string.Equals(Properties.Settings.Default.LanguageCode, languageCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            try
+            {
+                Properties.Settings.Default.LanguageCode = languageCode;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Language preference could not be saved: " + ex.Message);
+            }
+        }
+
+        private void ApplyLocalizedText()
+        {
+            ApplyBranding();
+            lblLanguage.Text = L("LanguageLabel");
+            lblClientPath.Text = L("ClientPath");
+            btnBrowseClient.Text = L("Browse");
+            btnCheckUpdates.Text = L("CheckUpdates");
+            btnUpdateClient.Text = L("UpdateClient");
+            btnLaunchGame.Text = L("EnterWorld");
+            btnClearCache.Text = L("ClearCache");
+            lblOnlinePlayerCount.Text = L("OnlinePlayersLabel");
+            lblFilesToUpdate.Text = L("PendingUpdates");
+            lblLog.Text = L("ActivityLog");
+            lblStatus.Text = L("StatusLabel");
+
+            ApplyCurrentStatusDisplay();
+            ApplyCurrentRealmStatusDisplay();
+            ApplyCurrentOnlinePlayerCountDisplay();
+            ApplyCurrentRemoteVersionDisplay();
+
+            if (currentReleaseNotes != null)
+            {
+                ShowReleaseNotes(currentReleaseNotes);
+            }
+            else
+            {
+                SetNewsText(currentNewsMessage);
+            }
         }
 
         private void InitializeClientPath()
@@ -300,10 +444,10 @@ namespace Wow_Launcher
             }
 
             SetBusyState(true, true);
-            SetStatusText("Checking for updates...");
+            SetStatusText(L("CheckingForUpdates"), StatusTone.Warning);
             SetRemoteVersionText("-");
             lstFilesToUpdate.Items.Clear();
-            SetNewsText("Gathering realm news...");
+            SetNewsText(L("GatheringRealmNews"));
             AppendLog("Loading manifest from " + manifestUri + ".");
 
             try
@@ -329,12 +473,12 @@ namespace Wow_Launcher
 
                 if (pendingFiles.Count == 0)
                 {
-                    SetStatusText("Client is up to date.");
+                    SetStatusText(L("ClientUpToDate"), StatusTone.Success);
                     AppendLog("No updates are required.");
                 }
                 else
                 {
-                    SetStatusText(pendingFiles.Count + " file(s) need to be updated.");
+                    SetStatusText(LF("FilesNeedUpdateFormat", pendingFiles.Count), StatusTone.Warning);
                     AppendLog("Found " + pendingFiles.Count + " file(s) to update.");
                 }
             }
@@ -343,10 +487,10 @@ namespace Wow_Launcher
                 currentManifest = null;
                 pendingFiles = new List<PendingUpdateFile>();
                 UpdatePendingFilesList();
-                SetStatusText("Update check failed.");
-                SetNewsText("Unable to load realm news until the manifest can be reached.");
+                SetStatusText(L("UpdateCheckFailed"), StatusTone.Error);
+                SetNewsText(L("UpdateCheckFailedNews"));
                 AppendLog("Update check failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "Update check failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, L("UpdateCheckFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -377,7 +521,7 @@ namespace Wow_Launcher
             progressUpdate.Value = 0;
             var filesToDownload = pendingFiles.ToList();
             int concurrentDownloads = Math.Min(MaxConcurrentDownloads, Math.Max(1, filesToDownload.Count));
-            SetStatusText("Downloading updates with " + concurrentDownloads + " threads...");
+            SetStatusText(LF("DownloadingUpdatesFormat", concurrentDownloads), StatusTone.Warning);
 
             try
             {
@@ -404,7 +548,7 @@ namespace Wow_Launcher
 
                             int finishedFiles = Interlocked.Increment(ref completedFiles);
                             AppendLog("Completed " + pendingFile.Entry.FilePath + ".");
-                            SetStatusText(string.Format("Downloaded {0}/{1} file(s)...", finishedFiles, filesToDownload.Count));
+                            SetStatusText(LF("DownloadedFilesFormat", finishedFiles, filesToDownload.Count), StatusTone.Warning);
                             UpdateProgress(totalBytes, Interlocked.Read(ref downloadedBytes), finishedFiles, filesToDownload.Count);
                         }
                         finally
@@ -419,23 +563,23 @@ namespace Wow_Launcher
                 progressUpdate.Value = 100;
                 pendingFiles = await BuildPendingFileListAsync(clientPath, manifestUri, currentManifest);
                 UpdatePendingFilesList();
-                SetStatusText(pendingFiles.Count == 0 ? "Update complete." : "Update finished with remaining files.");
+                SetStatusText(pendingFiles.Count == 0 ? L("UpdateComplete") : L("UpdateFinishedWithRemaining"), pendingFiles.Count == 0 ? StatusTone.Success : StatusTone.Warning);
                 AppendLog(pendingFiles.Count == 0 ? "All downloads completed successfully." : "Downloads finished, but some files still need attention.");
 
                 MessageBox.Show(
                     this,
                     pendingFiles.Count == 0
-                        ? "Client update finished successfully."
-                        : string.Format("Downloads finished, but {0} file(s) still require attention.", pendingFiles.Count),
-                    pendingFiles.Count == 0 ? "Update complete" : "Update finished",
+                        ? L("UpdateCompleteMessage")
+                        : LF("UpdateRemainingMessageFormat", pendingFiles.Count),
+                    pendingFiles.Count == 0 ? L("UpdateCompleteTitle") : L("UpdateFinishedTitle"),
                     MessageBoxButtons.OK,
                     pendingFiles.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
-                SetStatusText("Update failed.");
+                SetStatusText(L("UpdateFailed"), StatusTone.Error);
                 AppendLog("Update failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, L("UpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -449,13 +593,13 @@ namespace Wow_Launcher
             pendingFiles = new List<PendingUpdateFile>();
             UpdatePendingFilesList();
             SetRemoteVersionText("-");
-            SetStatusText("Ready");
+            SetStatusText(L("Ready"), StatusTone.Success);
             progressUpdate.Value = 0;
             btnUpdateClient.Enabled = false;
 
             if (clearNews)
             {
-                SetNewsText(DefaultNewsText);
+                SetNewsText(null);
             }
         }
 
@@ -490,7 +634,7 @@ namespace Wow_Launcher
             clientPath = GetSelectedClientPath();
             if (!Uri.TryCreate(ManifestUrl, UriKind.Absolute, out manifestUri) || (manifestUri.Scheme != Uri.UriSchemeHttp && manifestUri.Scheme != Uri.UriSchemeHttps))
             {
-                MessageBox.Show(this, "The hardcoded manifest URL is invalid.", "Invalid manifest URL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, L("InvalidManifestUrlMessage"), L("InvalidManifestUrlTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -501,13 +645,13 @@ namespace Wow_Launcher
 
             if (string.IsNullOrWhiteSpace(clientPath))
             {
-                MessageBox.Show(this, "Select the local client folder first.", "Missing client folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, L("MissingClientFolderMessage"), L("MissingClientFolderTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             if (!Directory.Exists(clientPath))
             {
-                MessageBox.Show(this, "The selected client folder does not exist.", "Invalid client folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, L("InvalidClientFolderMessage"), L("InvalidClientFolderTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
@@ -527,7 +671,7 @@ namespace Wow_Launcher
 
                 if (userInitiated)
                 {
-                    MessageBox.Show(this, ex.Message, "Launcher update check failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, ex.Message, L("LauncherUpdateCheckFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -574,12 +718,9 @@ namespace Wow_Launcher
                 return false;
             }
 
-            var prompt = string.Format(
-                "A launcher update is available.\r\n\r\nCurrent version: {0}\r\nAvailable version: {1}\r\n\r\nInstall it now? The launcher will restart after the update finishes.",
-                currentVersion,
-                remoteVersion);
+            var prompt = LF("LauncherUpdatePromptFormat", currentVersion, remoteVersion);
 
-            if (MessageBox.Show(this, prompt, "Launcher update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+            if (MessageBox.Show(this, prompt, L("LauncherUpdateAvailableTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
             {
                 skippedLauncherVersion = remoteVersion;
                 AppendLog("Launcher update postponed.");
@@ -599,7 +740,7 @@ namespace Wow_Launcher
             SetBusyState(true, false);
             progressUpdate.Style = ProgressBarStyle.Continuous;
             progressUpdate.Value = 0;
-            SetStatusText("Updating launcher...");
+            SetStatusText(L("UpdatingLauncher"), StatusTone.Warning);
             AppendLog("Downloading launcher update from " + downloadUri + ".");
 
             try
@@ -617,7 +758,7 @@ namespace Wow_Launcher
 
                 if (Process.Start(startInfo) == null)
                 {
-                    throw new InvalidOperationException("The launcher update could not be started.");
+                    throw new InvalidOperationException(L("LauncherUpdateStartFailed"));
                 }
 
                 AppendLog("Launcher update downloaded. Restarting to apply it.");
@@ -627,9 +768,9 @@ namespace Wow_Launcher
             }
             catch (Exception ex)
             {
-                SetStatusText("Launcher update failed.");
+                SetStatusText(L("LauncherUpdateFailed"), StatusTone.Error);
                 AppendLog("Launcher update failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "Launcher update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, L("LauncherUpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 SetBusyState(false, false);
                 return false;
             }
@@ -931,7 +1072,7 @@ namespace Wow_Launcher
         {
             if (manifest == null)
             {
-                SetNewsText(DefaultNewsText);
+                SetNewsText(null);
                 return;
             }
 
@@ -944,7 +1085,7 @@ namespace Wow_Launcher
 
             if (string.IsNullOrWhiteSpace(manifest.BreakingNewsUrl))
             {
-                SetNewsText("No realm news has been published yet.");
+                SetNewsText(L("NoRealmNews"));
                 return;
             }
 
@@ -971,7 +1112,7 @@ namespace Wow_Launcher
             }
             catch (Exception ex)
             {
-                SetNewsText("Realm news could not be loaded right now.");
+                SetNewsText(L("RealmNewsLoadFailed"));
                 AppendLog("News load failed: " + ex.Message);
             }
         }
@@ -1004,7 +1145,7 @@ namespace Wow_Launcher
                     Entry = entry,
                     LocalPath = localPath,
                     DownloadUri = GetRemoteFileUri(baseUri, entry.FilePath),
-                    Reason = reason
+                    ReasonKey = reason
                 });
             }
 
@@ -1015,13 +1156,13 @@ namespace Wow_Launcher
         {
             if (!File.Exists(localPath))
             {
-                return "Missing locally";
+                return "PendingReasonMissing";
             }
 
             var info = new FileInfo(localPath);
             if (entry.Size > 0 && info.Length != entry.Size)
             {
-                return "Size mismatch";
+                return "PendingReasonSizeMismatch";
             }
 
             if (!string.IsNullOrWhiteSpace(entry.Sha256))
@@ -1029,7 +1170,7 @@ namespace Wow_Launcher
                 var localHash = await Task.Run(() => ComputeSha256(localPath));
                 if (!string.Equals(localHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
-                    return "Hash mismatch";
+                    return "PendingReasonHashMismatch";
                 }
             }
 
@@ -1150,7 +1291,7 @@ namespace Wow_Launcher
 
             foreach (var pendingFile in pendingFiles)
             {
-                lstFilesToUpdate.Items.Add(pendingFile.Entry.FilePath + " - " + pendingFile.Reason);
+                lstFilesToUpdate.Items.Add(pendingFile.Entry.FilePath + " - " + L(pendingFile.ReasonKey));
             }
 
             lstFilesToUpdate.EndUpdate();
@@ -1269,16 +1410,16 @@ namespace Wow_Launcher
 
         private void ApplyBranding()
         {
-            Text = ServerName + " Launcher";
+            Text = LF("FormTitleFormat", ServerName);
             lblTitle.Text = ServerName;
-            grpConnection.Text = ServerName + " Client";
-            lblClientHint.Text = "Choose your 3.3.5a client folder, sync with " + ServerName + ", then enter the realm.";
-            grpNews.Text = ServerName + " News";
-            lblNewsHint.Text = "Breaking news and recent updates from the " + ServerName + " realm feed.";
-            grpUpdates.Text = ServerName + " Operations";
-            lblUpdatesHint.Text = "Track downloads, pending files, and live launcher activity for " + ServerName + ".";
-            lblRemoteVersion.Text = "OLD MAN WARCRAFT BUILD";
-            lblRealmStatusIndicator.Text = ServerName.ToUpperInvariant() + " STATUS";
+            grpConnection.Text = LF("ConnectionGroupFormat", ServerName);
+            lblClientHint.Text = LF("ClientHintFormat", ServerName);
+            grpNews.Text = LF("NewsGroupFormat", ServerName);
+            lblNewsHint.Text = LF("NewsHintFormat", ServerName);
+            grpUpdates.Text = LF("UpdatesGroupFormat", ServerName);
+            lblUpdatesHint.Text = LF("UpdatesHintFormat", ServerName);
+            lblRemoteVersion.Text = LF("RemoteVersionLabelFormat", ServerName.ToUpperInvariant());
+            lblRealmStatusIndicator.Text = LF("RealmStatusLabelFormat", ServerName.ToUpperInvariant());
             UpdateSubtitleText();
         }
 
@@ -1288,13 +1429,13 @@ namespace Wow_Launcher
             {
                 AppendLog("Checking realm status.");
                 var realmStatus = await LoadRealmStatusAsync();
-                SetRealmStatusIndicator("Online");
+                SetRealmStatusIndicator(RealmStatusState.Online);
                 SetOnlinePlayerCountText(BuildOnlinePlayerCountText(realmStatus));
                 AppendLog("Realm is online. " + BuildRealmStatusLogMessage(realmStatus));
             }
             catch (Exception ex)
             {
-                SetRealmStatusIndicator("Offline");
+                SetRealmStatusIndicator(RealmStatusState.Offline);
                 SetOnlinePlayerCountText("-");
                 AppendLog("Realm status check failed: " + ex.Message);
             }
@@ -1326,9 +1467,7 @@ namespace Wow_Launcher
 
         private void UpdateSubtitleText()
         {
-            lblSubtitle.Text = string.Format(
-                "Wrath of the Lich King 3.3.5a launcher for patches, realm news, and your next adventure. Launcher v{0}",
-                GetCurrentLauncherDisplayVersion());
+            lblSubtitle.Text = LF("SubtitleFormat", GetCurrentLauncherDisplayVersion());
         }
 
         private static string GetCurrentLauncherDisplayVersion()
@@ -1338,21 +1477,25 @@ namespace Wow_Launcher
             return string.IsNullOrWhiteSpace(version) ? GetCurrentLauncherVersion() : version.Trim();
         }
 
-        private void SetRealmStatusIndicator(string statusText)
+        private void SetRealmStatusIndicator(RealmStatusState statusState)
         {
-            string normalized = string.IsNullOrWhiteSpace(statusText) ? "Unknown" : statusText.Trim();
-            lblRealmStatusIndicatorValue.Text = normalized;
+            currentRealmStatusState = statusState;
+            ApplyCurrentRealmStatusDisplay();
+        }
 
-            string lowerStatus = normalized.ToLowerInvariant();
-            if (lowerStatus == "online")
+        private void ApplyCurrentRealmStatusDisplay()
+        {
+            lblRealmStatusIndicatorValue.Text = L(GetRealmStatusTextKey(currentRealmStatusState));
+
+            if (currentRealmStatusState == RealmStatusState.Online)
             {
                 lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(166, 208, 124);
             }
-            else if (lowerStatus == "offline")
+            else if (currentRealmStatusState == RealmStatusState.Offline)
             {
                 lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(232, 109, 103);
             }
-            else if (lowerStatus.Contains("check"))
+            else if (currentRealmStatusState == RealmStatusState.Checking)
             {
                 lblRealmStatusIndicatorValue.ForeColor = Color.FromArgb(239, 203, 110);
             }
@@ -1364,9 +1507,14 @@ namespace Wow_Launcher
 
         private void SetOnlinePlayerCountText(string playerCountText)
         {
-            string normalized = string.IsNullOrWhiteSpace(playerCountText) ? "-" : playerCountText.Trim();
-            lblOnlinePlayerCountValue.Text = normalized;
-            lblOnlinePlayerCountValue.ForeColor = normalized == "-"
+            currentOnlinePlayerCountText = string.IsNullOrWhiteSpace(playerCountText) ? "-" : playerCountText.Trim();
+            ApplyCurrentOnlinePlayerCountDisplay();
+        }
+
+        private void ApplyCurrentOnlinePlayerCountDisplay()
+        {
+            lblOnlinePlayerCountValue.Text = currentOnlinePlayerCountText;
+            lblOnlinePlayerCountValue.ForeColor = currentOnlinePlayerCountText == "-"
                 ? Color.FromArgb(186, 184, 176)
                 : Color.FromArgb(239, 203, 110);
         }
@@ -1384,7 +1532,7 @@ namespace Wow_Launcher
                 : realmStatus.PlayerCount.ToString();
         }
 
-        private static string BuildRealmStatusLogMessage(RealmStatusResponse realmStatus)
+        private string BuildRealmStatusLogMessage(RealmStatusResponse realmStatus)
         {
             if (realmStatus == null)
             {
@@ -1393,17 +1541,17 @@ namespace Wow_Launcher
 
             var details = new List<string>
             {
-                string.Format("Players: {0}/{1}", realmStatus.PlayerCount, Math.Max(realmStatus.PlayerCount, realmStatus.MaxPlayerCount))
+                string.Format("{0}: {1}/{2}", L("PlayersPrefix"), realmStatus.PlayerCount, Math.Max(realmStatus.PlayerCount, realmStatus.MaxPlayerCount))
             };
 
             if (realmStatus.QueuedSessions > 0)
             {
-                details.Add("Queue: " + realmStatus.QueuedSessions);
+                details.Add(L("QueuePrefix") + ": " + realmStatus.QueuedSessions);
             }
 
             if (!string.IsNullOrWhiteSpace(realmStatus.UptimeFormatted))
             {
-                details.Add("Uptime: " + realmStatus.UptimeFormatted.Trim());
+                details.Add(L("UptimePrefix") + ": " + realmStatus.UptimeFormatted.Trim());
             }
 
             return string.Join(" | ", details);
@@ -1418,21 +1566,26 @@ namespace Wow_Launcher
             button.Cursor = Cursors.Hand;
         }
 
-        private void SetStatusText(string statusText)
+        private void SetStatusText(string statusText, StatusTone statusTone)
         {
-            string normalized = (statusText ?? string.Empty).Trim();
-            lblStatusValue.Text = string.IsNullOrWhiteSpace(normalized) ? "-" : normalized;
+            currentStatusText = (statusText ?? string.Empty).Trim();
+            currentStatusTone = statusTone;
+            ApplyCurrentStatusDisplay();
+        }
 
-            string lowerStatus = normalized.ToLowerInvariant();
-            if (lowerStatus.Contains("failed"))
+        private void ApplyCurrentStatusDisplay()
+        {
+            lblStatusValue.Text = string.IsNullOrWhiteSpace(currentStatusText) ? "-" : currentStatusText;
+
+            if (currentStatusTone == StatusTone.Error)
             {
                 lblStatusValue.ForeColor = Color.FromArgb(232, 109, 103);
             }
-            else if (lowerStatus.Contains("up to date") || lowerStatus.Contains("complete") || lowerStatus.Contains("cleared") || lowerStatus == "ready")
+            else if (currentStatusTone == StatusTone.Success)
             {
                 lblStatusValue.ForeColor = Color.FromArgb(166, 208, 124);
             }
-            else if (lowerStatus.Contains("check") || lowerStatus.Contains("download") || lowerStatus.Contains("update"))
+            else if (currentStatusTone == StatusTone.Warning)
             {
                 lblStatusValue.ForeColor = Color.FromArgb(239, 203, 110);
             }
@@ -1444,18 +1597,25 @@ namespace Wow_Launcher
 
         private void SetRemoteVersionText(string versionText)
         {
-            string displayVersion = string.IsNullOrWhiteSpace(versionText) ? "-" : versionText.Trim();
-            lblRemoteVersionValue.Text = displayVersion;
-            lblRemoteVersionValue.ForeColor = displayVersion == "-"
+            currentRemoteVersionText = string.IsNullOrWhiteSpace(versionText) ? "-" : versionText.Trim();
+            ApplyCurrentRemoteVersionDisplay();
+        }
+
+        private void ApplyCurrentRemoteVersionDisplay()
+        {
+            lblRemoteVersionValue.Text = currentRemoteVersionText;
+            lblRemoteVersionValue.ForeColor = currentRemoteVersionText == "-"
                 ? Color.FromArgb(186, 184, 176)
                 : Color.FromArgb(239, 203, 110);
         }
 
         private void SetNewsText(string message)
         {
+            currentReleaseNotes = null;
+            currentNewsMessage = string.IsNullOrWhiteSpace(message) ? GetDefaultNewsText() : message.Trim();
             txtNews.Clear();
-            AppendNewsHeading(ServerName + " News");
-            AppendNewsBody(string.IsNullOrWhiteSpace(message) ? DefaultNewsText : message.Trim());
+            AppendNewsHeading(LF("NewsHeadingFormat", ServerName));
+            AppendNewsBody(currentNewsMessage);
             txtNews.Select(0, 0);
         }
 
@@ -1463,7 +1623,7 @@ namespace Wow_Launcher
         {
             if (string.IsNullOrWhiteSpace(newsText))
             {
-                return "No realm news has been published yet.";
+                return L("NoRealmNews");
             }
 
             ReleaseNotesFeed releaseNotes;
@@ -1495,14 +1655,14 @@ namespace Wow_Launcher
             }
         }
 
-        private static string BuildReleaseNotesSummary(ReleaseNotesFeed releaseNotes)
+        private string BuildReleaseNotesSummary(ReleaseNotesFeed releaseNotes)
         {
             var latest = releaseNotes.Latest ?? releaseNotes.History.FirstOrDefault();
             var builder = new StringBuilder();
 
             if (latest != null)
             {
-                builder.Append("Breaking News");
+                builder.Append(L("BreakingNewsHeading"));
                 if (!string.IsNullOrWhiteSpace(latest.Version))
                 {
                     builder.Append(" - ").Append(latest.Version.Trim());
@@ -1534,7 +1694,7 @@ namespace Wow_Launcher
                     builder.AppendLine();
                 }
 
-                builder.AppendLine("Recent Updates");
+                builder.AppendLine(L("RecentUpdatesHeading"));
                 foreach (var entry in history)
                 {
                     builder.Append("- ");
@@ -1554,21 +1714,21 @@ namespace Wow_Launcher
                 }
             }
 
-            return builder.Length == 0 ? "No realm news has been published yet." : builder.ToString().Trim();
+            return builder.Length == 0 ? L("NoRealmNews") : builder.ToString().Trim();
         }
 
-        private static string BuildReleaseNoteMetadata(ReleaseNotesEntry entry)
+        private string BuildReleaseNoteMetadata(ReleaseNotesEntry entry)
         {
             var parts = new List<string>();
 
             if (!string.IsNullOrWhiteSpace(entry.CreatedAt))
             {
-                parts.Add("Published: " + entry.CreatedAt.Trim());
+                parts.Add(L("PublishedPrefix") + ": " + entry.CreatedAt.Trim());
             }
 
             if (!string.IsNullOrWhiteSpace(entry.CreatedBy))
             {
-                parts.Add("By: " + entry.CreatedBy.Trim());
+                parts.Add(L("ByPrefix") + ": " + entry.CreatedBy.Trim());
             }
 
             return string.Join(" | ", parts);
@@ -1584,18 +1744,20 @@ namespace Wow_Launcher
 
         private void ShowReleaseNotes(ReleaseNotesFeed releaseNotes)
         {
+            currentReleaseNotes = releaseNotes;
+            currentNewsMessage = null;
             txtNews.Clear();
-            AppendNewsHeading(ServerName + " News");
+            AppendNewsHeading(LF("NewsHeadingFormat", ServerName));
             AppendNewsSpacing();
 
             var latest = releaseNotes.Latest ?? (releaseNotes.History ?? new List<ReleaseNotesEntry>()).FirstOrDefault();
             if (latest != null)
             {
-                AppendNewsHeading("Breaking News");
+                AppendNewsHeading(L("BreakingNewsHeading"));
 
                 if (!string.IsNullOrWhiteSpace(latest.Version))
                 {
-                    AppendNewsSubheading("Build " + latest.Version.Trim());
+                    AppendNewsSubheading(L("BuildPrefix") + " " + latest.Version.Trim());
                 }
 
                 if (!string.IsNullOrWhiteSpace(latest.ReleaseNotes))
@@ -1618,7 +1780,7 @@ namespace Wow_Launcher
             if (history.Count > 0)
             {
                 AppendNewsSpacing();
-                AppendNewsHeading("Recent Updates");
+                AppendNewsHeading(L("RecentUpdatesHeading"));
 
                 foreach (var entry in history)
                 {
@@ -1640,7 +1802,7 @@ namespace Wow_Launcher
 
             if (txtNews.TextLength == 0)
             {
-                SetNewsText("No realm news has been published yet.");
+                SetNewsText(L("NoRealmNews"));
                 return;
             }
 
@@ -1692,6 +1854,21 @@ namespace Wow_Launcher
         private void AppendLog(string message)
         {
             txtLog.AppendText(string.Format("[{0:HH:mm:ss}] {1}{2}", DateTime.Now, message, Environment.NewLine));
+        }
+
+        private static string GetRealmStatusTextKey(RealmStatusState statusState)
+        {
+            switch (statusState)
+            {
+                case RealmStatusState.Checking:
+                    return "RealmStatusChecking";
+                case RealmStatusState.Online:
+                    return "RealmStatusOnline";
+                case RealmStatusState.Offline:
+                    return "RealmStatusOffline";
+                default:
+                    return "RealmStatusUnknown";
+            }
         }
 
         private static string ComputeSha256(string filePath)

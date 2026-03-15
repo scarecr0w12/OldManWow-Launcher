@@ -44,6 +44,8 @@
             this.btnUpdateClient = new System.Windows.Forms.Button();
             this.btnCheckUpdates = new System.Windows.Forms.Button();
             this.btnBrowseClient = new System.Windows.Forms.Button();
+            this.cmbLanguage = new System.Windows.Forms.ComboBox();
+            this.lblLanguage = new System.Windows.Forms.Label();
             this.txtClientPath = new System.Windows.Forms.TextBox();
             this.lblOnlinePlayerCountValue = new System.Windows.Forms.Label();
             this.lblOnlinePlayerCount = new System.Windows.Forms.Label();
@@ -168,6 +170,8 @@
             this.grpConnection.Controls.Add(this.btnUpdateClient);
             this.grpConnection.Controls.Add(this.btnCheckUpdates);
             this.grpConnection.Controls.Add(this.btnBrowseClient);
+            this.grpConnection.Controls.Add(this.cmbLanguage);
+            this.grpConnection.Controls.Add(this.lblLanguage);
             this.grpConnection.Controls.Add(this.txtClientPath);
             this.grpConnection.Controls.Add(this.lblOnlinePlayerCountValue);
             this.grpConnection.Controls.Add(this.lblOnlinePlayerCount);
@@ -260,6 +264,33 @@
             this.btnBrowseClient.UseVisualStyleBackColor = false;
             this.btnBrowseClient.Click += new System.EventHandler(this.btnBrowseClient_Click);
             // 
+            // cmbLanguage
+            // 
+            this.cmbLanguage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.cmbLanguage.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(20)))), ((int)(((byte)(31)))));
+            this.cmbLanguage.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbLanguage.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.cmbLanguage.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.cmbLanguage.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(229)))), ((int)(((byte)(225)))), ((int)(((byte)(214)))));
+            this.cmbLanguage.FormattingEnabled = true;
+            this.cmbLanguage.Location = new System.Drawing.Point(509, 85);
+            this.cmbLanguage.Name = "cmbLanguage";
+            this.cmbLanguage.Size = new System.Drawing.Size(142, 23);
+            this.cmbLanguage.TabIndex = 13;
+            this.cmbLanguage.SelectedIndexChanged += new System.EventHandler(this.cmbLanguage_SelectedIndexChanged);
+            // 
+            // lblLanguage
+            // 
+            this.lblLanguage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblLanguage.AutoSize = true;
+            this.lblLanguage.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblLanguage.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(206)))), ((int)(((byte)(202)))), ((int)(((byte)(192)))));
+            this.lblLanguage.Location = new System.Drawing.Point(506, 66);
+            this.lblLanguage.Name = "lblLanguage";
+            this.lblLanguage.Size = new System.Drawing.Size(59, 15);
+            this.lblLanguage.TabIndex = 14;
+            this.lblLanguage.Text = "Language";
+            // 
             // txtClientPath
             // 
             this.txtClientPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
@@ -270,7 +301,7 @@
             this.txtClientPath.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(229)))), ((int)(((byte)(225)))), ((int)(((byte)(214)))));
             this.txtClientPath.Location = new System.Drawing.Point(17, 86);
             this.txtClientPath.Name = "txtClientPath";
-            this.txtClientPath.Size = new System.Drawing.Size(634, 23);
+            this.txtClientPath.Size = new System.Drawing.Size(486, 23);
             this.txtClientPath.TabIndex = 3;
             this.txtClientPath.TextChanged += new System.EventHandler(this.txtClientPath_TextChanged);
             // 
@@ -520,12 +551,14 @@
         private System.Windows.Forms.Button btnClearCache;
         private System.Windows.Forms.Button btnLaunchGame;
         private System.Windows.Forms.Button btnUpdateClient;
+        private System.Windows.Forms.ComboBox cmbLanguage;
         private System.Windows.Forms.GroupBox grpConnection;
         private System.Windows.Forms.GroupBox grpNews;
         private System.Windows.Forms.GroupBox grpUpdates;
         private System.Windows.Forms.Label lblClientPath;
         private System.Windows.Forms.Label lblClientHint;
         private System.Windows.Forms.Label lblFilesToUpdate;
+        private System.Windows.Forms.Label lblLanguage;
         private System.Windows.Forms.Label lblLog;
         private System.Windows.Forms.Label lblNewsHint;
         private System.Windows.Forms.Label lblOnlinePlayerCount;

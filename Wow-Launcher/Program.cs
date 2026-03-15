@@ -14,6 +14,7 @@ namespace Wow_Launcher
         [STAThread]
         static void Main(string[] args)
         {
+            AppLocalization.ApplyCulture(AppLocalization.ResolveLanguageCode(Properties.Settings.Default.LanguageCode));
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -29,6 +30,11 @@ namespace Wow_Launcher
     internal static class SelfUpdater
     {
         private const string ApplySelfUpdateArgument = "--apply-self-update";
+
+        private static string LanguageCode
+        {
+            get { return AppLocalization.ResolveLanguageCode(Properties.Settings.Default.LanguageCode); }
+        }
 
         public static string BuildArguments(string targetExecutablePath, int sourceProcessId)
         {
@@ -46,7 +52,11 @@ namespace Wow_Launcher
             int sourceProcessId;
             if (string.IsNullOrWhiteSpace(targetExecutablePath) || !int.TryParse(args[2], out sourceProcessId))
             {
-                MessageBox.Show("The launcher update arguments are invalid.", "Launcher update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(
+                    AppLocalization.Get("SelfUpdateInvalidArgumentsMessage", LanguageCode),
+                    AppLocalization.Get("SelfUpdateFailedTitle", LanguageCode),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
                 return true;
             }
 
@@ -56,7 +66,11 @@ namespace Wow_Launcher
             }
             catch (Exception ex)
             {
-                MessageBox.Show("The launcher could not update itself.\r\n\r\n" + ex.Message, "Launcher update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(
+                    AppLocalization.Format("SelfUpdateFailedMessageFormat", LanguageCode, ex.Message),
+                    AppLocalization.Get("SelfUpdateFailedTitle", LanguageCode),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
 
             return true;

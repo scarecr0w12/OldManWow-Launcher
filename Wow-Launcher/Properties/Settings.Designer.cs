@@ -41,5 +41,20 @@ namespace Wow_Launcher.Properties
                 this["ClientPath"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LanguageCode
+        {
+            get
+            {
+                return ((string)(this["LanguageCode"]));
+            }
+            set
+            {
+                this["LanguageCode"] = value;
+            }
+        }
     }
 }
