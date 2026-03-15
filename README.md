@@ -8,14 +8,18 @@ It targets `.NET Framework 4.7.2` and provides:
 - launcher self-updates from the latest GitHub release
 - a built-in news panel powered by the manifest `breakingNewsUrl` feed
 - GitHub Actions automation for validation, tagging, release publishing, and launcher delivery
+- GitLab CI/CD automation for validation, tagging, and release publishing
 
 ## Project Structure
 
 - `Wow-Launcher/` - Windows Forms application
 - `scripts/Build-Launcher.ps1` - local and CI build script
 - `scripts/New-GitHubTag.ps1` - automatic GitHub tag creation script
+- `scripts/New-GitLabTag.ps1` - automatic GitLab tag creation script
 - `scripts/Generate-Manifest.ps1` - client update manifest generator
+- `scripts/Publish-GitLabRelease.ps1` - GitLab release publishing script
 - `.github/workflows/` - GitHub Actions CI/CD workflows
+- `.gitlab-ci.yml` - GitLab CI/CD pipeline
 - `SERVER_SIDE_SETUP.md` - update hosting and deployment guide
 
 ## Runtime Update Architecture
@@ -49,6 +53,7 @@ When the release tag version is newer than the running assembly version, the lau
 - Visual Studio or Build Tools with `MSBuild.exe`
 - `.NET Framework 4.7.2` targeting pack
 - GitHub Actions enabled for the repository
+- GitLab Windows runner with PowerShell and `MSBuild.exe` available
 
 ## Local Development
 
@@ -106,6 +111,27 @@ The project uses these workflows:
 - pull requests run the validation build
 - pushes to `main` run validation and then create the next launcher tag
 - tag pushes build the launcher with the tag version and publish the GitHub release
+
+## GitLab CI/CD
+
+The repository now also includes a `.gitlab-ci.yml` pipeline for Windows runners.
+
+### Pipeline behavior
+
+- merge requests and branch pushes run the validation build
+- pushes to the default branch create the next patch tag unless the commit message contains `[skip release]`
+- semantic version tags such as `v1.0.1` build `Wow-Launcher.exe` and publish a GitLab release
+
+### GitLab CI variables
+
+- `CI_JOB_TOKEN` can be used when the GitLab instance allows job-token access to tags and releases
+- otherwise set a protected masked `GITLAB_TOKEN` with `api` scope for tag and release creation
+
+### Runner requirements
+
+- Windows GitLab runner
+- PowerShell available as the job shell
+- Visual Studio Build Tools or equivalent `MSBuild.exe` installation
 
 ### Automatic tagging
 

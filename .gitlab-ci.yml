@@ -1,0 +1,44 @@
+stages:
+  - build
+  - tag
+  - release
+
+variables:
+  GIT_DEPTH: "0"
+
+build_launcher:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts'
+  artifacts:
+    name: 'Wow-Launcher-$CI_COMMIT_REF_SLUG-$CI_PIPELINE_ID'
+    paths:
+      - artifacts/Wow-Launcher.exe
+
+create_release_tag:
+  stage: tag
+  resource_group: create-release-tag-main
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE !~ /\[skip release\]/'
+  script:
+    - .\scripts\New-GitLabTag.ps1 -RemoteName 'origin'
+
+release_launcher:
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+(\.\d+)?$/'
+  script:
+    - .\scripts\Build-Launcher.ps1 -ProjectPath 'Wow-Launcher\Wow-Launcher.csproj' -Configuration 'Release' -OutputDirectory 'artifacts' -ReleaseVersion $env:CI_COMMIT_TAG
+    - .\scripts\Publish-GitLabRelease.ps1 -ReleaseTag $env:CI_COMMIT_TAG -ArtifactPath 'artifacts/Wow-Launcher.exe'
+  artifacts:
+    name: 'Wow-Launcher-$CI_COMMIT_TAG'
+    paths:
+      - artifacts/Wow-Launcher.exe
+    expire_in: never
