@@ -32,6 +32,11 @@ namespace Wow_Launcher
         private const string RealmStatusApiUrl = "http://140.150.202.236:8081/api/server";
         private const string RealmStatusApiKey = "sadlkjflasdkjg438gh";
         private const int MaxConcurrentDownloads = 4;
+        private const string SourceUpdateServer = "Old Man Warcraft update server";
+        private const string SourceLauncherUpdateService = "Launcher self-update service";
+        private const string SourceLauncherConfiguration = "Launcher configuration";
+        private const string SourceNetwork = "Network or connectivity";
+        private const string SourceLocalClient = "Local client files";
 
         private readonly HttpClient httpClient = new HttpClient();
         private UpdateManifest currentManifest;
@@ -63,6 +68,26 @@ namespace Wow_Launcher
             Checking,
             Online,
             Offline
+        }
+
+        private sealed class LauncherOperationException : Exception
+        {
+            public LauncherOperationException(string likelySource, string step, string detail, Uri requestUri = null, HttpStatusCode? statusCode = null, Exception innerException = null)
+                : base(detail, innerException)
+            {
+                LikelySource = string.IsNullOrWhiteSpace(likelySource) ? "Unknown" : likelySource;
+                Step = string.IsNullOrWhiteSpace(step) ? "Unknown" : step;
+                RequestUri = requestUri;
+                StatusCode = statusCode;
+            }
+
+            public string LikelySource { get; private set; }
+
+            public string Step { get; private set; }
+
+            public Uri RequestUri { get; private set; }
+
+            public HttpStatusCode? StatusCode { get; private set; }
         }
 
         public Form1()
@@ -450,12 +475,20 @@ namespace Wow_Launcher
             SetNewsText(L("GatheringRealmNews"));
             AppendLog("Loading manifest from " + manifestUri + ".");
 
+            string currentStep = "downloading the update manifest";
+            string currentSource = SourceUpdateServer;
+            Uri currentRequestUri = manifestUri;
+
             try
             {
                 currentManifest = await LoadManifestAsync(manifestUri);
 
                 try
                 {
+                    currentStep = "checking for launcher updates";
+                    currentSource = SourceLauncherUpdateService;
+                    currentRequestUri = null;
+
                     if (await TryHandleLauncherUpdateAsync(true))
                     {
                         return;
@@ -463,10 +496,17 @@ namespace Wow_Launcher
                 }
                 catch (Exception ex)
                 {
-                    AppendLog("Launcher update check skipped: " + ex.Message);
+                    AppendDetailedFailureLog("Launcher update check skipped.", ex, currentSource, currentStep, currentRequestUri);
                 }
 
+                currentStep = "loading realm news";
+                currentSource = SourceUpdateServer;
+                currentRequestUri = ResolveNewsUri(currentManifest, manifestUri);
                 await LoadNewsAsync(currentManifest, manifestUri);
+
+                currentStep = "comparing local files to the manifest";
+                currentSource = SourceLocalClient;
+                currentRequestUri = null;
                 pendingFiles = await BuildPendingFileListAsync(clientPath, manifestUri, currentManifest);
                 SetRemoteVersionText(currentManifest.Version);
                 UpdatePendingFilesList();
@@ -489,8 +529,8 @@ namespace Wow_Launcher
                 UpdatePendingFilesList();
                 SetStatusText(L("UpdateCheckFailed"), StatusTone.Error);
                 SetNewsText(L("UpdateCheckFailedNews"));
-                AppendLog("Update check failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, L("UpdateCheckFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AppendDetailedFailureLog("Update check failed.", ex, currentSource, currentStep, currentRequestUri);
+                MessageBox.Show(this, BuildDetailedErrorMessage(ex, currentSource, currentStep, currentRequestUri), L("UpdateCheckFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -578,8 +618,8 @@ namespace Wow_Launcher
             catch (Exception ex)
             {
                 SetStatusText(L("UpdateFailed"), StatusTone.Error);
-                AppendLog("Update failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, L("UpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AppendDetailedFailureLog("Update failed.", ex, SourceLocalClient, "downloading and applying client files", null);
+                MessageBox.Show(this, BuildDetailedErrorMessage(ex, SourceLocalClient, "downloading and applying client files", null), L("UpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -667,11 +707,11 @@ namespace Wow_Launcher
             }
             catch (Exception ex)
             {
-                AppendLog("Launcher update check failed: " + ex.Message);
+                AppendDetailedFailureLog("Launcher update check failed.", ex, SourceLauncherUpdateService, "checking for launcher updates", null);
 
                 if (userInitiated)
                 {
-                    MessageBox.Show(this, ex.Message, L("LauncherUpdateCheckFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, BuildDetailedErrorMessage(ex, SourceLauncherUpdateService, "checking for launcher updates", null), L("LauncherUpdateCheckFailedTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -769,8 +809,8 @@ namespace Wow_Launcher
             catch (Exception ex)
             {
                 SetStatusText(L("LauncherUpdateFailed"), StatusTone.Error);
-                AppendLog("Launcher update failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, L("LauncherUpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AppendDetailedFailureLog("Launcher update failed.", ex, SourceLauncherUpdateService, "downloading and applying the launcher update", downloadUri);
+                MessageBox.Show(this, BuildDetailedErrorMessage(ex, SourceLauncherUpdateService, "downloading and applying the launcher update", downloadUri), L("LauncherUpdateFailed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
                 SetBusyState(false, false);
                 return false;
             }
@@ -849,21 +889,209 @@ namespace Wow_Launcher
             httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         }
 
-        private async Task<GitHubRelease> LoadLatestLauncherReleaseAsync()
+        private static LauncherOperationException FindOperationException(Exception ex)
         {
-            using (var latestResponse = await httpClient.GetAsync(GetLauncherReleaseApiUrl()))
+            while (ex != null)
             {
-                if (latestResponse.StatusCode == HttpStatusCode.NotFound)
+                var operationException = ex as LauncherOperationException;
+                if (operationException != null)
+                {
+                    return operationException;
+                }
+
+                ex = ex.InnerException;
+            }
+
+            return null;
+        }
+
+        private static string GetMostRelevantErrorMessage(Exception ex)
+        {
+            var operationException = FindOperationException(ex);
+            if (operationException != null && !string.IsNullOrWhiteSpace(operationException.Message))
+            {
+                return operationException.Message.Trim();
+            }
+
+            string message = ex == null ? null : ex.GetBaseException().Message;
+            return string.IsNullOrWhiteSpace(message) ? "No additional details were provided." : message.Trim();
+        }
+
+        private string BuildDetailedErrorMessage(Exception ex, string fallbackSource, string fallbackStep, Uri fallbackRequestUri)
+        {
+            var operationException = FindOperationException(ex);
+            string likelySource = operationException != null ? operationException.LikelySource : fallbackSource;
+            string step = operationException != null ? operationException.Step : fallbackStep;
+            Uri requestUri = operationException != null && operationException.RequestUri != null ? operationException.RequestUri : fallbackRequestUri;
+            HttpStatusCode? statusCode = operationException != null ? operationException.StatusCode : null;
+            string details = GetMostRelevantErrorMessage(ex);
+
+            var lines = new List<string>
+            {
+                "Likely source: " + (string.IsNullOrWhiteSpace(likelySource) ? "Unknown" : likelySource),
+                "Step: " + (string.IsNullOrWhiteSpace(step) ? "Unknown" : step)
+            };
+
+            if (requestUri != null)
+            {
+                lines.Add("Request: " + requestUri);
+            }
+
+            if (statusCode.HasValue)
+            {
+                lines.Add("HTTP status: " + (int)statusCode.Value + " " + statusCode.Value);
+            }
+
+            lines.Add("Details: " + details);
+            return string.Join(Environment.NewLine, lines);
+        }
+
+        private void AppendDetailedFailureLog(string prefix, Exception ex, string fallbackSource, string fallbackStep, Uri fallbackRequestUri)
+        {
+            var operationException = FindOperationException(ex);
+            string likelySource = operationException != null ? operationException.LikelySource : fallbackSource;
+            string step = operationException != null ? operationException.Step : fallbackStep;
+            Uri requestUri = operationException != null && operationException.RequestUri != null ? operationException.RequestUri : fallbackRequestUri;
+            HttpStatusCode? statusCode = operationException != null ? operationException.StatusCode : null;
+
+            var parts = new List<string>
+            {
+                prefix,
+                "Source: " + (string.IsNullOrWhiteSpace(likelySource) ? "Unknown" : likelySource),
+                "Step: " + (string.IsNullOrWhiteSpace(step) ? "Unknown" : step)
+            };
+
+            if (requestUri != null)
+            {
+                parts.Add("Request: " + requestUri);
+            }
+
+            if (statusCode.HasValue)
+            {
+                parts.Add("HTTP status: " + (int)statusCode.Value + " " + statusCode.Value);
+            }
+
+            parts.Add("Details: " + GetMostRelevantErrorMessage(ex));
+            AppendLog(string.Join(" | ", parts));
+        }
+
+        private async Task EnsureSuccessStatusCodeAsync(HttpResponseMessage response, string likelySource, string step)
+        {
+            if (response != null && response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            throw await CreateHttpFailureExceptionAsync(response, likelySource, step);
+        }
+
+        private async Task<LauncherOperationException> CreateHttpFailureExceptionAsync(HttpResponseMessage response, string likelySource, string step)
+        {
+            Uri requestUri = response == null || response.RequestMessage == null ? null : response.RequestMessage.RequestUri;
+            HttpStatusCode? statusCode = response == null ? (HttpStatusCode?)null : response.StatusCode;
+            string detail = "The remote endpoint returned an unsuccessful response.";
+
+            if (statusCode.HasValue)
+            {
+                detail = string.Format("The remote endpoint returned HTTP {0} {1}.", (int)statusCode.Value, statusCode.Value);
+            }
+
+            string responsePreview = response == null ? null : await TryReadResponsePreviewAsync(response.Content);
+            if (!string.IsNullOrWhiteSpace(responsePreview))
+            {
+                detail += " Response preview: " + responsePreview;
+            }
+
+            return new LauncherOperationException(likelySource, step, detail, requestUri, statusCode);
+        }
+
+        private static async Task<string> TryReadResponsePreviewAsync(HttpContent content)
+        {
+            if (content == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                string text = await content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(text))
                 {
                     return null;
                 }
 
-                latestResponse.EnsureSuccessStatusCode();
-                using (var stream = await latestResponse.Content.ReadAsStreamAsync())
+                string singleLine = text.Trim().Replace("\r", " ").Replace("\n", " ");
+                return singleLine.Length <= 300 ? singleLine : singleLine.Substring(0, 300) + "...";
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task<GitHubRelease> LoadLatestLauncherReleaseAsync()
+        {
+            string releaseApiUrl;
+            try
+            {
+                releaseApiUrl = GetLauncherReleaseApiUrl();
+            }
+            catch (Exception ex)
+            {
+                throw new LauncherOperationException(SourceLauncherConfiguration, "reading launcher update settings", GetMostRelevantErrorMessage(ex), null, null, ex);
+            }
+
+            Uri releaseUri;
+            if (!Uri.TryCreate(releaseApiUrl, UriKind.Absolute, out releaseUri))
+            {
+                throw new LauncherOperationException(SourceLauncherConfiguration, "building the launcher update request", "The launcher update API URL is invalid.", null);
+            }
+
+            try
+            {
+                using (var latestResponse = await httpClient.GetAsync(releaseUri))
                 {
-                    var serializer = new DataContractJsonSerializer(typeof(GitHubRelease));
-                    return serializer.ReadObject(stream) as GitHubRelease;
+                    if (latestResponse.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        return null;
+                    }
+
+                    await EnsureSuccessStatusCodeAsync(latestResponse, SourceLauncherUpdateService, "checking for launcher updates");
+                    using (var stream = await latestResponse.Content.ReadAsStreamAsync())
+                    {
+                        try
+                        {
+                            var serializer = new DataContractJsonSerializer(typeof(GitHubRelease));
+                            var release = serializer.ReadObject(stream) as GitHubRelease;
+                            if (release == null)
+                            {
+                                throw new LauncherOperationException(SourceLauncherUpdateService, "parsing launcher update data", "The launcher update response was empty.", releaseUri);
+                            }
+
+                            return release;
+                        }
+                        catch (LauncherOperationException)
+                        {
+                            throw;
+                        }
+                        catch (SerializationException ex)
+                        {
+                            throw new LauncherOperationException(SourceLauncherUpdateService, "parsing launcher update data", GetMostRelevantErrorMessage(ex), releaseUri, null, ex);
+                        }
+                    }
                 }
+            }
+            catch (LauncherOperationException)
+            {
+                throw;
+            }
+            catch (TaskCanceledException ex)
+            {
+                throw new LauncherOperationException(SourceNetwork, "checking for launcher updates", "The request timed out while contacting the launcher update service.", releaseUri, null, ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new LauncherOperationException(SourceNetwork, "checking for launcher updates", GetMostRelevantErrorMessage(ex), releaseUri, null, ex);
             }
         }
 
@@ -1044,28 +1272,67 @@ namespace Wow_Launcher
 
         private async Task<UpdateManifest> LoadManifestAsync(Uri manifestUri)
         {
-            using (var response = await httpClient.GetAsync(manifestUri))
+            try
             {
-                response.EnsureSuccessStatusCode();
-                using (var stream = await response.Content.ReadAsStreamAsync())
+                using (var response = await httpClient.GetAsync(manifestUri))
                 {
-                    var serializer = new XmlSerializer(typeof(UpdateManifest));
-                    var manifest = serializer.Deserialize(stream) as UpdateManifest;
-
-                    if (manifest == null)
+                    await EnsureSuccessStatusCodeAsync(response, SourceUpdateServer, "downloading the update manifest");
+                    using (var stream = await response.Content.ReadAsStreamAsync())
                     {
-                        throw new InvalidOperationException("The remote manifest is empty.");
-                    }
+                        try
+                        {
+                            var serializer = new XmlSerializer(typeof(UpdateManifest));
+                            var manifest = serializer.Deserialize(stream) as UpdateManifest;
 
-                    manifest.Files = manifest.Files ?? new List<UpdateFileEntry>();
-                    if (manifest.Files.Count == 0)
-                    {
-                        throw new InvalidOperationException("The remote manifest does not contain any files.");
-                    }
+                            if (manifest == null)
+                            {
+                                throw new LauncherOperationException(SourceUpdateServer, "validating the update manifest", "The remote manifest is empty.", manifestUri);
+                            }
 
-                    return manifest;
+                            manifest.Files = manifest.Files ?? new List<UpdateFileEntry>();
+                            if (manifest.Files.Count == 0)
+                            {
+                                throw new LauncherOperationException(SourceUpdateServer, "validating the update manifest", "The remote manifest does not contain any files.", manifestUri);
+                            }
+
+                            return manifest;
+                        }
+                        catch (LauncherOperationException)
+                        {
+                            throw;
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            throw new LauncherOperationException(SourceUpdateServer, "parsing the update manifest", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+                        }
+                    }
                 }
             }
+            catch (LauncherOperationException)
+            {
+                throw;
+            }
+            catch (TaskCanceledException ex)
+            {
+                throw new LauncherOperationException(SourceNetwork, "downloading the update manifest", "The request timed out while contacting the update server.", manifestUri, null, ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new LauncherOperationException(SourceNetwork, "downloading the update manifest", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+            }
+        }
+
+        private Uri ResolveNewsUri(UpdateManifest manifest, Uri manifestUri)
+        {
+            if (manifest == null || string.IsNullOrWhiteSpace(manifest.BreakingNewsUrl))
+            {
+                return null;
+            }
+
+            Uri newsUri;
+            return Uri.TryCreate(manifest.BreakingNewsUrl, UriKind.Absolute, out newsUri)
+                ? newsUri
+                : new Uri(manifestUri, manifest.BreakingNewsUrl);
         }
 
         private async Task LoadNewsAsync(UpdateManifest manifest, Uri manifestUri)
@@ -1089,38 +1356,61 @@ namespace Wow_Launcher
                 return;
             }
 
+            Uri newsUri = ResolveNewsUri(manifest, manifestUri);
+
             try
             {
-                Uri newsUri;
-                if (!Uri.TryCreate(manifest.BreakingNewsUrl, UriKind.Absolute, out newsUri))
+                using (var response = await httpClient.GetAsync(newsUri))
                 {
-                    newsUri = new Uri(manifestUri, manifest.BreakingNewsUrl);
-                }
-
-                var newsText = await httpClient.GetStringAsync(newsUri);
-                ReleaseNotesFeed releaseNotes;
-                if (TryDeserializeReleaseNotes(newsText, out releaseNotes))
-                {
-                    ShowReleaseNotes(releaseNotes);
-                }
-                else
-                {
-                    SetNewsText(newsText);
+                    await EnsureSuccessStatusCodeAsync(response, SourceUpdateServer, "loading realm news");
+                    var newsText = await response.Content.ReadAsStringAsync();
+                    ReleaseNotesFeed releaseNotes;
+                    if (TryDeserializeReleaseNotes(newsText, out releaseNotes))
+                    {
+                        ShowReleaseNotes(releaseNotes);
+                    }
+                    else
+                    {
+                        SetNewsText(newsText);
+                    }
                 }
 
                 AppendLog("Loaded realm news from " + newsUri + ".");
             }
+            catch (LauncherOperationException ex)
+            {
+                SetNewsText(L("RealmNewsLoadFailed"));
+                AppendDetailedFailureLog("News load failed.", ex, SourceUpdateServer, "loading realm news", newsUri);
+            }
+            catch (TaskCanceledException ex)
+            {
+                SetNewsText(L("RealmNewsLoadFailed"));
+                AppendDetailedFailureLog("News load failed.", new LauncherOperationException(SourceNetwork, "loading realm news", "The request timed out while loading realm news.", newsUri, null, ex), SourceUpdateServer, "loading realm news", newsUri);
+            }
+            catch (HttpRequestException ex)
+            {
+                SetNewsText(L("RealmNewsLoadFailed"));
+                AppendDetailedFailureLog("News load failed.", new LauncherOperationException(SourceNetwork, "loading realm news", GetMostRelevantErrorMessage(ex), newsUri, null, ex), SourceUpdateServer, "loading realm news", newsUri);
+            }
             catch (Exception ex)
             {
                 SetNewsText(L("RealmNewsLoadFailed"));
-                AppendLog("News load failed: " + ex.Message);
+                AppendDetailedFailureLog("News load failed.", ex, SourceUpdateServer, "loading realm news", newsUri);
             }
         }
 
         private async Task<List<PendingUpdateFile>> BuildPendingFileListAsync(string clientPath, Uri manifestUri, UpdateManifest manifest)
         {
             var results = new List<PendingUpdateFile>();
-            var baseUri = GetBaseUri(manifestUri, manifest.BaseUrl);
+            Uri baseUri;
+            try
+            {
+                baseUri = GetBaseUri(manifestUri, manifest.BaseUrl);
+            }
+            catch (Exception ex)
+            {
+                throw new LauncherOperationException(SourceUpdateServer, "validating the update manifest base URL", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+            }
 
             foreach (var entry in manifest.Files.Where(file => !string.IsNullOrWhiteSpace(file.FilePath)))
             {
@@ -1130,21 +1420,55 @@ namespace Wow_Launcher
                     continue;
                 }
 
-                ValidateRelativePath(entry.FilePath);
+                try
+                {
+                    ValidateRelativePath(entry.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    throw new LauncherOperationException(SourceUpdateServer, "validating the update manifest file list", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+                }
 
-                string localPath = GetSafeLocalPath(clientPath, entry.FilePath);
-                string reason = await GetPendingReasonAsync(localPath, entry);
+                string localPath;
+                try
+                {
+                    localPath = GetSafeLocalPath(clientPath, entry.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    throw new LauncherOperationException(SourceUpdateServer, "validating the update manifest file list", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+                }
+
+                string reason;
+                try
+                {
+                    reason = await GetPendingReasonAsync(localPath, entry);
+                }
+                catch (Exception ex)
+                {
+                    throw new LauncherOperationException(SourceLocalClient, "reading local client files", entry.FilePath + ": " + GetMostRelevantErrorMessage(ex), null, null, ex);
+                }
 
                 if (reason == null)
                 {
                     continue;
                 }
 
+                Uri downloadUri;
+                try
+                {
+                    downloadUri = GetRemoteFileUri(baseUri, entry.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    throw new LauncherOperationException(SourceUpdateServer, "building remote file download URLs", GetMostRelevantErrorMessage(ex), manifestUri, null, ex);
+                }
+
                 results.Add(new PendingUpdateFile
                 {
                     Entry = entry,
                     LocalPath = localPath,
-                    DownloadUri = GetRemoteFileUri(baseUri, entry.FilePath),
+                    DownloadUri = downloadUri,
                     ReasonKey = reason
                 });
             }
